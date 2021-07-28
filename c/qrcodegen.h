@@ -23,9 +23,21 @@
 
 #pragma once
 
+#ifdef __riscos
+typedef enum { false, true } bool;
+#else
 #include <stdbool.h>
+#endif
 #include <stddef.h>
+#ifdef __riscos
+typedef unsigned char uint8_t;
+typedef   signed char int8_t;
+typedef unsigned long uint32_t;
+#define SIZE_MAX ((size_t)0xFFFFFFFFlu)
+#define INT16_MAX (0x7FFFl)
+#else
 #include <stdint.h>
+#endif
 
 
 #ifdef __cplusplus
@@ -60,7 +72,7 @@ enum qrcodegen_Ecc {
 	qrcodegen_Ecc_LOW = 0 ,  // The QR Code can tolerate about  7% erroneous codewords
 	qrcodegen_Ecc_MEDIUM  ,  // The QR Code can tolerate about 15% erroneous codewords
 	qrcodegen_Ecc_QUARTILE,  // The QR Code can tolerate about 25% erroneous codewords
-	qrcodegen_Ecc_HIGH    ,  // The QR Code can tolerate about 30% erroneous codewords
+	qrcodegen_Ecc_HIGH       // The QR Code can tolerate about 30% erroneous codewords
 };
 
 
@@ -79,7 +91,7 @@ enum qrcodegen_Mask {
 	qrcodegen_Mask_4,
 	qrcodegen_Mask_5,
 	qrcodegen_Mask_6,
-	qrcodegen_Mask_7,
+	qrcodegen_Mask_7
 };
 
 
@@ -91,7 +103,7 @@ enum qrcodegen_Mode {
 	qrcodegen_Mode_ALPHANUMERIC = 0x2,
 	qrcodegen_Mode_BYTE         = 0x4,
 	qrcodegen_Mode_KANJI        = 0x8,
-	qrcodegen_Mode_ECI          = 0x7,
+	qrcodegen_Mode_ECI          = 0x7
 };
 
 

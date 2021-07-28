@@ -24,7 +24,9 @@
  *   Software.
  */
 
+#ifndef __riscos
 #include <stdbool.h>
+#endif
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -139,10 +141,9 @@ static void doSegmentDemo(void) {
 		{
 			uint8_t *segBuf0 = malloc(qrcodegen_calcSegmentBufferSize(qrcodegen_Mode_ALPHANUMERIC, strlen(silver0)) * sizeof(uint8_t));
 			uint8_t *segBuf1 = malloc(qrcodegen_calcSegmentBufferSize(qrcodegen_Mode_NUMERIC, strlen(silver1)) * sizeof(uint8_t));
-			struct qrcodegen_Segment segs[] = {
-				qrcodegen_makeAlphanumeric(silver0, segBuf0),
-				qrcodegen_makeNumeric(silver1, segBuf1),
-			};
+			struct qrcodegen_Segment segs[2];
+            segs[0] = qrcodegen_makeAlphanumeric(silver0, segBuf0);
+			segs[1] = qrcodegen_makeNumeric(silver1, segBuf1);
 			ok = qrcodegen_encodeSegments(segs, sizeof(segs) / sizeof(segs[0]), qrcodegen_Ecc_LOW, tempBuffer, qrcode);
 			free(segBuf0);
 			free(segBuf1);
@@ -171,18 +172,21 @@ static void doSegmentDemo(void) {
 		}
 		{
 			uint8_t *bytes = malloc(strlen(golden0) * sizeof(uint8_t));
-			for (size_t i = 0, len = strlen(golden0); i < len; i++)
+            size_t i, len;
+            uint8_t *segBuf0, *segBuf1, *segBuf2;
+			for (i = 0, len = strlen(golden0); i < len; i++)
 				bytes[i] = (uint8_t)golden0[i];
-			uint8_t *segBuf0 = malloc(qrcodegen_calcSegmentBufferSize(qrcodegen_Mode_BYTE, strlen(golden0)) * sizeof(uint8_t));
-			uint8_t *segBuf1 = malloc(qrcodegen_calcSegmentBufferSize(qrcodegen_Mode_NUMERIC, strlen(golden1)) * sizeof(uint8_t));
-			uint8_t *segBuf2 = malloc(qrcodegen_calcSegmentBufferSize(qrcodegen_Mode_ALPHANUMERIC, strlen(golden2)) * sizeof(uint8_t));
-			struct qrcodegen_Segment segs[] = {
-				qrcodegen_makeBytes(bytes, strlen(golden0), segBuf0),
-				qrcodegen_makeNumeric(golden1, segBuf1),
-				qrcodegen_makeAlphanumeric(golden2, segBuf2),
-			};
-			free(bytes);
-			ok = qrcodegen_encodeSegments(segs, sizeof(segs) / sizeof(segs[0]), qrcodegen_Ecc_LOW, tempBuffer, qrcode);
+			segBuf0 = malloc(qrcodegen_calcSegmentBufferSize(qrcodegen_Mode_BYTE, strlen(golden0)) * sizeof(uint8_t));
+			segBuf1 = malloc(qrcodegen_calcSegmentBufferSize(qrcodegen_Mode_NUMERIC, strlen(golden1)) * sizeof(uint8_t));
+			segBuf2 = malloc(qrcodegen_calcSegmentBufferSize(qrcodegen_Mode_ALPHANUMERIC, strlen(golden2)) * sizeof(uint8_t));
+            {
+			    struct qrcodegen_Segment segs[3];
+                segs[0] = qrcodegen_makeBytes(bytes, strlen(golden0), segBuf0);
+				segs[1] = qrcodegen_makeNumeric(golden1, segBuf1),
+				segs[2] = qrcodegen_makeAlphanumeric(golden2, segBuf2),
+			    free(bytes);
+			    ok = qrcodegen_encodeSegments(segs, sizeof(segs) / sizeof(segs[0]), qrcodegen_Ecc_LOW, tempBuffer, qrcode);
+            }
 			free(segBuf0);
 			free(segBuf1);
 			free(segBuf2);
@@ -223,11 +227,13 @@ static void doSegmentDemo(void) {
 			size_t len = sizeof(kanjiChars) / sizeof(kanjiChars[0]);
 			uint8_t *segBuf = calloc(qrcodegen_calcSegmentBufferSize(qrcodegen_Mode_KANJI, len), sizeof(uint8_t));
 			struct qrcodegen_Segment seg;
+            size_t i;
 			seg.mode = qrcodegen_Mode_KANJI;
 			seg.numChars = (int)len;
 			seg.bitLength = 0;
-			for (size_t i = 0; i < len; i++) {
-				for (int j = 12; j >= 0; j--, seg.bitLength++)
+			for (i = 0; i < len; i++) {
+                int j;
+				for (j = 12; j >= 0; j--, seg.bitLength++)
 					segBuf[seg.bitLength >> 3] |= ((kanjiChars[i] >> j) & 1) << (7 - (seg.bitLength & 7));
 			}
 			seg.data = segBuf;
@@ -301,8 +307,9 @@ static void doMaskDemo(void) {
 static void printQr(const uint8_t qrcode[]) {
 	int size = qrcodegen_getSize(qrcode);
 	int border = 4;
-	for (int y = -border; y < size + border; y++) {
-		for (int x = -border; x < size + border; x++) {
+    int x, y;
+	for (y = -border; y < size + border; y++) {
+		for (x = -border; x < size + border; x++) {
 			fputs((qrcodegen_getModule(qrcode, x, y) ? "##" : "  "), stdout);
 		}
 		fputs("\n", stdout);
