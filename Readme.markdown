@@ -1,6 +1,13 @@
 QR Code generator library
 =========================
 
+Fork note
+---------
+This is a fork of the QR Code generator library to build for RISC OS.
+
+It includes a command line tool which will either print a code to the screen, or generate
+a RISC OS sprite of the QR code.
+
 
 Introduction
 ------------

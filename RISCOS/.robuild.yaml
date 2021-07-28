@@ -22,10 +22,21 @@ jobs:
     # The build will terminate if any command returns a non-0 return code or an error.
     script:
       - cdir Artifacts
+
+      - echo **** Building and running test code ****
+      - amu -f MakefileTest BUILD32=1
+      - /aif32.QRCodeGen-Test
+
+      - echo **** Building library ****
       - amu -f MakefileLib export
       - copy <Lib$Dir>.QRCodeGen Artifacts.Lib ~CVR
+
+      - echo **** Building command line tool ****
       - amu -f MakefileTool BUILD32=1
       - copy aif32.QRCodeGen Artifacts.QRCodeGen ~CVR
+
+      - echo **** Run tool as a test that it works ****
+      - /aif32.QRCodeGen "hello world"
 
     # Outputs from the build are defined in artifacts
     # These are a list of artifacts to report directories or files.
