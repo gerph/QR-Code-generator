@@ -1,0 +1,233 @@
+/*******************************************************************
+ * File:        qrcodegen-tool
+ * Purpose:     A tool for creating QR Code images
+ * Author:      Gerph
+ * Date:        28 Jul 2021
+ ******************************************************************/
+
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdarg.h>
+#ifdef __riscos
+#include "swis.h"
+#endif
+
+#include "getopt.h"
+
+#include "qrcodegen.h"
+#include "VersionNum"
+
+
+#define TOOL Module_ComponentName
+
+void syntax(int fail)
+{
+    printf(TOOL " " Module_FullVersionAndDate " (C) Project Nayuki\n");
+    printf("Generates a QR code image.\n");
+    printf("Syntax: *QRCodeGen <options> [<text>]\n");
+    printf("\n");
+    printf("Switches:\n");
+    printf("    -t <text>     Text string to encode, in UTF-8\n");
+    printf("    -e <error>    Error correction (0: low, 3: high, default: 2)\n");
+    printf("    -m <mask>     Mask type (0-7, or 'auto', default 'auto')\n");
+    printf("    -z <size>     Minimum size to use (1-40, default 1)\n");
+    printf("    -s <sprite>   Sprite file to write to (default is text)\n");
+
+    exit(fail ? 1 : 0);
+}
+
+
+void fatal(char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+
+    fprintf(stderr, TOOL " error: ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+
+    va_end(ap);
+
+    exit(1);
+}
+
+
+// Prints the given QR Code to the console.
+static void printQr(FILE *fh, const uint8_t qrcode[], int border)
+{
+    int size = qrcodegen_getSize(qrcode);
+    int x, y;
+    for (y = -border; y < size + border; y++) {
+        for (x = -border; x < size + border; x++) {
+            fputs((qrcodegen_getModule(qrcode, x, y) ? "#" : " "), fh);
+        }
+        fputs("\n", fh);
+    }
+    fputs("\n", fh);
+}
+
+
+
+void write_word(FILE *fh, uint32_t word)
+{
+    /* Only works on little endian systems */
+    fwrite(&word, 1, 4, fh);
+}
+
+
+void createSpriteFile(FILE *fh, const uint8_t qrcode[])
+{
+    int size = qrcodegen_getSize(qrcode);
+    int width = size;
+    int height = size;
+    int width_words = (width + 31) / 32;
+    int width_bytes = width_words * 4;
+
+    int spritelen = width_bytes * height;
+    int palettelen = 2*4*2;
+
+    write_word(fh, 1);  /* Number of sprites */
+    write_word(fh, 16); /* Offset of sprite */
+    write_word(fh, spritelen + palettelen + 16 + 44); /* Next free */
+    write_word(fh, spritelen + palettelen + 44); /* Offset of next */
+    fwrite("qrcode\0\0\0\0\0\0", 12, 1, fh); /* name */
+    write_word(fh, width_words - 1);
+    write_word(fh, height - 1);
+    write_word(fh, 0);  /* first bit used */
+    write_word(fh, (width - 1) & 31); /* last bit used */
+    write_word(fh, 44 + palettelen); /* offset of sprite */
+    write_word(fh, 44 + palettelen); /* offset of mask (no mask present) */
+
+    write_word(fh, 18); /* Mode 18 is a square pixel 2bpp mode */
+    /* Palette entries */
+    write_word(fh, 0xFFFFFF10); /* Colour 0 */
+    write_word(fh, 0xFFFFFF10); /* Colour 0 */
+    write_word(fh, 0x00000010); /* Colour 1 */
+    write_word(fh, 0x00000010); /* Colour 1 */
+
+    /* Now we write out the sprite data */
+
+    {
+        int x, y;
+        uint32_t accumulator;
+        for (y = 0; y < size; y++) {
+            accumulator = 0;
+
+            for (x = 0; x < size; x++) {
+                if (x != 0 && (x & 31) == 0)
+                {
+                    write_word(fh, accumulator);
+                    accumulator = 0;
+                }
+                if (qrcodegen_getModule(qrcode, x, y))
+                {
+                    accumulator |= (1<<(x&31));
+                }
+            }
+            write_word(fh, accumulator);
+        }
+    }
+}
+
+
+int main(int argc, char *argv[])
+{
+    enum qrcodegen_Ecc ecc = qrcodegen_Ecc_QUARTILE;
+    int minVersion = qrcodegen_VERSION_MIN;
+    int maxVersion = qrcodegen_VERSION_MAX;
+    enum qrcodegen_Mask mask = qrcodegen_Mask_AUTO;
+    int c;
+    unsigned long value;
+    char *end;
+    char *spritefile = NULL;
+    const char *text = NULL;
+
+    while ((c=getopt(argc, argv, "ht:e:m:z:s:")) != EOF)
+    {
+        switch (c)
+        {
+            case 'h':   /* help */
+                syntax(0);
+                break;
+
+            case 't':   /* text */
+                text = optarg;
+                break;
+
+            case 's':   /* sprite output */
+                spritefile = optarg;
+                break;
+
+            case 'e':   /* error correction level */
+                value = strtoul(optarg, &end, 10);
+                if (*end != '\0' || value > 3)
+                    fatal("-e switch requires an argument 0 to 3");
+                ecc = (enum qrcodegen_Ecc)value;
+                break;
+
+            case 'm':   /* mask type */
+                if (strcmp(optarg, "auto") == 0)
+                {
+                    mask = qrcodegen_Mask_AUTO;
+                }
+                else
+                {
+                    value = strtoul(optarg, &end, 10);
+                    if (*end != '\0' || value > 7)
+                        fatal("-m switch requires an argument 0 to 7 or auto");
+                    mask = (enum qrcodegen_Mask)value;
+                }
+                break;
+
+            case 'z':   /* minimum size; the minimum version */
+                value = strtoul(optarg, &end, 10);
+                if (*end != '\0' || value == 0 || value > 40)
+                    fatal("-z switch requires an argument 1 to 40");
+                minVersion = (int)value;
+                break;
+        }
+    }
+
+    if (text==NULL && optind<argc)
+        text = argv[optind++];
+
+    if (text==NULL)
+        syntax(1);
+
+    /* We've got all the parameters, now to make a QR code */
+    {
+        size_t bufferLen    = (size_t)qrcodegen_BUFFER_LEN_FOR_VERSION(maxVersion);
+        uint8_t *qrcode     = malloc(bufferLen * sizeof(uint8_t));
+        uint8_t *tempBuffer = malloc(bufferLen * sizeof(uint8_t));
+        int ok;
+
+        if (qrcode == NULL || tempBuffer == NULL)
+            fatal("Not enough memory (need at least %i bytes)", bufferLen);
+
+        ok = qrcodegen_encodeText(text, tempBuffer, qrcode,
+                                  ecc, minVersion, maxVersion, mask,
+                                  true /* boost ECL if we can */);
+        if (!ok)
+            fatal("Cannot encode text with the parameters supplied");
+
+        if (spritefile)
+        {
+            FILE *fh = fopen(spritefile, "wb");
+            if (!fh)
+                fatal("Cannot write to '%s'", spritefile);
+            createSpriteFile(fh, qrcode);
+            fclose(fh);
+#ifdef __riscos
+            _swix(OS_File, _INR(0, 2), 18, spritefile, 0xFF9);
+#endif
+        }
+        else
+        {
+            printQr(stdout, qrcode, 0);
+        }
+    }
+
+
+    return 0;
+}
