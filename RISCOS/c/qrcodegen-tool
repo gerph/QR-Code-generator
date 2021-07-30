@@ -29,6 +29,7 @@ void syntax(int fail)
     printf("\n");
     printf("Switches:\n");
     printf("    -t <text>     Text string to encode, in UTF-8\n");
+    printf("    -b <border>   Border in pixels (default: 4)\n");
     printf("    -e <error>    Error correction (0: low, 3: high, default: 2)\n");
     printf("    -m <mask>     Mask type (0-7, or 'auto', default 'auto')\n");
     printf("    -z <size>     Minimum size to use (1-40, default 1)\n");
@@ -76,11 +77,11 @@ void write_word(FILE *fh, uint32_t word)
 }
 
 
-void createSpriteFile(FILE *fh, const uint8_t qrcode[])
+void createSpriteFile(FILE *fh, const uint8_t qrcode[], int border)
 {
     int size = qrcodegen_getSize(qrcode);
-    int width = size;
-    int height = size;
+    int width = size + (border * 2);
+    int height = size + (border * 2);
     int width_words = (width + 31) / 32;
     int width_bytes = width_words * 4;
 
@@ -101,26 +102,26 @@ void createSpriteFile(FILE *fh, const uint8_t qrcode[])
 
     write_word(fh, 18); /* Mode 18 is a square pixel 2bpp mode */
     /* Palette entries */
-    write_word(fh, 0xFFFFFF10); /* Colour 0 */
-    write_word(fh, 0xFFFFFF10); /* Colour 0 */
-    write_word(fh, 0x00000010); /* Colour 1 */
-    write_word(fh, 0x00000010); /* Colour 1 */
+    write_word(fh, 0x00000010); /* Colour 0 */
+    write_word(fh, 0x00000010); /* Colour 0 */
+    write_word(fh, 0xFFFFFF10); /* Colour 1 */
+    write_word(fh, 0xFFFFFF10); /* Colour 1 */
 
     /* Now we write out the sprite data */
 
     {
         int x, y;
         uint32_t accumulator;
-        for (y = 0; y < size; y++) {
+        for (y = 0; y < height; y++) {
             accumulator = 0;
 
-            for (x = 0; x < size; x++) {
+            for (x = 0; x < width; x++) {
                 if (x != 0 && (x & 31) == 0)
                 {
                     write_word(fh, accumulator);
                     accumulator = 0;
                 }
-                if (qrcodegen_getModule(qrcode, x, y))
+                if (qrcodegen_getModule(qrcode, x - border, y - border))
                 {
                     accumulator |= (1<<(x&31));
                 }
@@ -139,11 +140,12 @@ int main(int argc, char *argv[])
     enum qrcodegen_Mask mask = qrcodegen_Mask_AUTO;
     int c;
     unsigned long value;
+    int border = 4;
     char *end;
     char *spritefile = NULL;
     const char *text = NULL;
 
-    while ((c=getopt(argc, argv, "ht:e:m:z:s:")) != EOF)
+    while ((c=getopt(argc, argv, "ht:e:m:z:s:b:")) != EOF)
     {
         switch (c)
         {
@@ -157,6 +159,13 @@ int main(int argc, char *argv[])
 
             case 's':   /* sprite output */
                 spritefile = optarg;
+                break;
+
+            case 'b':   /* border in pixels */
+                value = strtoul(optarg, &end, 10);
+                if (*end != '\0')
+                    fatal("-b switch requires a number");
+                border = (int)value;
                 break;
 
             case 'e':   /* error correction level */
@@ -216,7 +225,7 @@ int main(int argc, char *argv[])
             FILE *fh = fopen(spritefile, "wb");
             if (!fh)
                 fatal("Cannot write to '%s'", spritefile);
-            createSpriteFile(fh, qrcode);
+            createSpriteFile(fh, qrcode, border);
             fclose(fh);
 #ifdef __riscos
             _swix(OS_File, _INR(0, 2), 18, spritefile, 0xFF9);
@@ -224,8 +233,11 @@ int main(int argc, char *argv[])
         }
         else
         {
-            printQr(stdout, qrcode, 0);
+            printQr(stdout, qrcode, border);
         }
+
+        free(qrcode);
+        free(tempBuffer);
     }
 
 

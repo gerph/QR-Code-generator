@@ -37,6 +37,7 @@ Syntax: `*QRCodeGen <options> [<text>]`
 Options:
 
 * `-t <text>`: Text string to encode, in UTF-8
+* `-b <border>`: Border size in pixels (default: 4)
 * `-e <error>`: Error correction (0: low, 3: high, default: 2)
 * `-m <mask>`: Mask type (0-7, or 'auto', default 'auto')
 * `-z <size>`: Minimum size to use (1-40, default 1)
