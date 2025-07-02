@@ -29,7 +29,7 @@ typedef enum { false, true } bool;
 #include <stdbool.h>
 #endif
 #include <stddef.h>
-#ifdef __riscos
+#if defined(__riscos) && ! defined(__riscos64)
 typedef unsigned char uint8_t;
 typedef   signed char int8_t;
 typedef unsigned long uint32_t;
