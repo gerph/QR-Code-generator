@@ -31,7 +31,7 @@ jobs:
 
       - echo **** Building library ****
       - amu -f MakefileLib export
-      - copy <Lib$Dir>.QRCodeGen Artifacts.Lib ~CVR
+      - copy <Exports$Dir>.Lib.QRCodeGen Artifacts.Lib ~CVR
 
       - echo **** Building command line tool ****
       - amu -f MakefileTool
