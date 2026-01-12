@@ -14,6 +14,8 @@ jobs:
     # Multiple variables may be assigned.
     env:
       "Sys$Environment": ROBuild
+      "BUILD32": 1
+      "Alias$AMU": "HostAMU %*0"
 
     # Directory to change to before running script
     #dir: <working directory>
@@ -24,7 +26,7 @@ jobs:
       - cdir Artifacts
 
       - echo **** Building and running test code ****
-      - amu -f MakefileTest BUILD32=1
+      - amu -f MakefileTest
       - /aif32.QRCodeGen-Test
 
       - echo **** Building library ****
@@ -32,7 +34,7 @@ jobs:
       - copy <Lib$Dir>.QRCodeGen Artifacts.Lib ~CVR
 
       - echo **** Building command line tool ****
-      - amu -f MakefileTool BUILD32=1
+      - amu -f MakefileTool
       - copy aif32.QRCodeGen Artifacts.QRCodeGen ~CVR
 
       - echo **** Run tool as a test that it works ****
