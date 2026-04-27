@@ -1,7 +1,7 @@
 %YAML 1.0
 ---
 
-# Example .robuild.yml file
+# RISC OS build file to execute on https://build.riscos.online/
 
 # Source is optional (NYI), and should be a URL to source the content from
 #source: <url>
@@ -14,6 +14,10 @@ jobs:
     # Multiple variables may be assigned.
     env:
       "Sys$Environment": ROBuild
+      "BUILD32": 1
+
+      # Faster building using the host toolchain
+      "Alias$AMU": "HostAMU %*0"
 
     # Directory to change to before running script
     #dir: <working directory>
@@ -21,29 +25,76 @@ jobs:
     # Commands which should be executed to perform the build.
     # The build will terminate if any command returns a non-0 return code or an error.
     script:
-      - cdir Artifacts
-
       - echo **** Building and running test code ****
       - amu -f MakefileTest BUILD32=1
       - /aif32.QRCodeGen-Test
 
-      - echo **** Building library ****
+
+      # Export our headers and libraries
+      - echo
+      - echo *** Export the headers or libs ***
       - amu -f MakefileLib export
 
+      # CLI tool
       - echo **** Building command line tool ****
       - amu -f MakefileTool BUILD32=1
-      - copy aif32.QRCodeGen Artifacts.QRCodeGen ~CVR
 
       - echo **** Run tool as a test that it works ****
       - /aif32.QRCodeGen "hello world"
 
-      - echo **** Building module ****
-      - amu -f MakefileModule BUILD32=1
-      - copy rm32.MakeQRCode Artifacts.MakeQRCode ~CVR
+      # Build modules (RAM)
+      - echo
+      - echo *** Build the RAM module (32-bit) ***
+      - amu -f MakefileModule ram
 
-      - echo **** Run module smoke tests ****
+      - echo
+      - echo *** Build the RAM module (26-bit) ***
+      - amu -f MakefileModule ram BUILD26=1 BUILD32=
+
+      # Build modules for ROM
+      - echo
+      - echo *** Build the ROM module (32-bit) ***
+      - amu -f MakefileModule rom
+
+      - echo
+      - echo *** Build the ROM module (26-bit) ***
+      - amu -f MakefileModule rom BUILD26=1 BUILD32=
+
+      # Tests - loading to check that it starts up
+      - echo
+      - echo *** Load the module ***
       - RMLoad rm32.MakeQRCode
+
+      # Insert any testing here...
+      - echo
+      - echo *** Test that the module works ***
       - Run test-module
+
+      - echo
+      - echo *** Kill the module ***
+      - RMKill MakeQRCode
+
+      # Construct the artifacts to release
+      - echo *** Copy artifacts ***
+      - cdir Artifacts
+      - copy aif32 Artifacts.* ~CVR
+      - copy rm32 Artifacts.* ~CVR
+      - copy rm Artifacts.* ~CVR
+      - copy aof32 Artifacts.* ~CVR
+      - copy aof Artifacts.* ~CVR
+      - IfThere <Exports$Dir>.C.h.MakeQRCode Then cdir Artifacts.Lib
+      - IfThere <Exports$Dir>.C.h.MakeQRCode Then cdir Artifacts.Lib.h
+      - IfThere <Exports$Dir>.C.h.MakeQRCode Then copy <Exports$Dir>.C.h.MakeQRCode Artifacts.Lib.h.MakeQRCode ~CV
+      - IfThere <Exports$Dir>.Lib.MakeQRCode Then cdir Artifacts.Lib
+      - IfThere <Exports$Dir>.Lib.MakeQRCode Then copy <Exports$Dir>.Lib.MakeQRCode Artifacts.Lib.MakeQRCode ~CVR
+      # Remove the directory if it was empty
+      - X remove <Exports$Dir>.Lib.MakeQRCode
+      - X remove <Exports$Dir>.Lib
+      - IfThere LICENSE Then copy LICENSE Artifacts.* ~CV
+
+      # Done!
+      - echo
+      - echo *** SUCCESS ***
 
     # Outputs from the build are defined in artifacts
     # These are a list of artifacts to report directories or files.

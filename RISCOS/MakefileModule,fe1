@@ -17,10 +17,10 @@ CLEANTARGET = cleantarget
 EXPORTS    = ${EXP_C_H}.${COMPONENT}SWIs
 
 # Comma-separated list of paths to use for includes.
-INCLUDES   = C:qrcodegen.
+INCLUDES   = C:QRCodeGen.
 
 # Space separated list of libraries to link against.
-LIBS       =
+LIBS       = C:QRCodeGen.o.libQRCodeGen
 
 # Space separated list of defines to set.
 CDEFINES   =
@@ -28,8 +28,7 @@ CDEFINES   =
 # Objects to build, using the format o.<name> (will be varied for build type)
 OBJS       = o.modhead \
             o.module \
-            o.makeqrcode \
-            o.qrcodegen
+            o.makeqrcode
 
 FORTIFY    = no
 

@@ -25,7 +25,7 @@ TYPE       = aif
 
 # Comma-separated list of paths to use for includes, such as:
 #	<Lib$Dir>.LibName.
-INCLUDES   = C:qrcodegen.,C:getopt.
+INCLUDES   = C:QRCodeGen.,C:GetOpt.
 
 # Space separated list of defines to set, eg -DDEBUG
 CDEFINES   =
@@ -33,7 +33,7 @@ CDEFINES   =
 # Space separated list of libraries to link against.
 LIBS       = ${CLIB} \
 			 ${GETOPTLIB} \
-			 C:qrcodegen.o.libqrcodegen
+			 C:QRCodeGen.o.libQRCodeGen
 
 # Objects to build, using the format o.<name> (will be varied for build type)
 OBJS       = o.qrcodegen-tool
