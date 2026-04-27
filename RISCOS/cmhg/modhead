@@ -1,0 +1,16 @@
+; MakeQRCode module header
+;
+; The SWI and error bases are unallocated and must be registered before
+; distribution.
+
+#include "VersionNum"
+
+title-string: MakeQRCode
+help-string: MakeQRCode Module_MajorVersion_CMHG
+
+swi-chunk-base-number: &C83C0
+
+initialisation-code: Mod_Init
+finalisation-code: Mod_Final
+
+swi-decoding-table: MakeQRCode Sprite/SWI_Sprite Encode/SWI_Encode Render/SWI_Render EncodeSegments/SWI_EncodeSegments Info/SWI_Info

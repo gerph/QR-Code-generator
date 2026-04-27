@@ -29,7 +29,6 @@ jobs:
 
       - echo **** Building library ****
       - amu -f MakefileLib export
-      - copy <Lib$Dir>.QRCodeGen Artifacts.Lib ~CVR
 
       - echo **** Building command line tool ****
       - amu -f MakefileTool BUILD32=1
@@ -37,6 +36,14 @@ jobs:
 
       - echo **** Run tool as a test that it works ****
       - /aif32.QRCodeGen "hello world"
+
+      - echo **** Building module ****
+      - amu -f MakefileModule BUILD32=1
+      - copy rm32.MakeQRCode Artifacts.MakeQRCode ~CVR
+
+      - echo **** Run module smoke tests ****
+      - RMLoad rm32.MakeQRCode
+      - Run test-module
 
     # Outputs from the build are defined in artifacts
     # These are a list of artifacts to report directories or files.

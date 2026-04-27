@@ -24,9 +24,15 @@ Building the RISC OS tool:
 
     amu -f MakefileTool BUILD32=1
 
+Building and testing the MakeQRCode module:
+
+    amu -f MakefileModule BUILD32=1
+    RMLoad rm32.MakeQRCode
+    Run test-module
+
 Building through the RISC OS build service (and show the list of files built):
 
-    zip -9r /tmp/source-archive.zip c h Makefile* VersionNum .robuild.yaml
+    zip -9r /tmp/source-archive.zip c h cmhg prminxml Makefile* VersionNum test-module,fd1 .robuild.yaml
     riscos-build-online -i /tmp/source-archive.zip -o /tmp/built
     unzip -l /tmp/built
 
@@ -50,3 +56,10 @@ Example to display the QR code to the screen:
 Example to save a sprite file:
 
     *QRCodeGen -s sprite "Hello world"
+
+## Module
+
+The `MakeQRCode` module provides SWIs for creating QR codes directly from
+applications. The interface is documented in PRM-in-XML format in
+`prminxml/MakeQRCode.xml`; a generated HTML version is in
+`prminxml/html/MakeQRCode.html`.

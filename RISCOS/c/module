@@ -1,0 +1,151 @@
+/*******************************************************************
+ * File:        module
+ * Purpose:     MakeQRCode module SWI interface
+ * Author:      Gerph
+ ******************************************************************/
+
+#include <stdlib.h>
+
+#include "kernel.h"
+#include "modhead.h"
+#include "makeqrcode.h"
+
+/* #define DEBUG */
+
+#ifdef DEBUG
+#include <stdio.h>
+#define dprintf if (1) printf
+#else
+#define dprintf (void)
+#endif
+
+
+/***************************************************************************
+ * Function:     Mod_Init
+ * Description:  Initialise the module.
+ * Parameters:   tail        = pointer to command line
+ *               podule_base = address of podule module was started from
+ *               pw          = private word for module
+ * On exit:      Return NULL for successful initialisation.
+ **************************************************************************/
+_kernel_oserror *Mod_Init(const char *tail, int podule_base, void *pw)
+{
+    dprintf("Module MakeQRCode initialised\n");
+    return NULL;
+}
+
+
+/***************************************************************************
+ * Function:     Mod_Final
+ * Description:  Finalise the module.
+ * Parameters:   fatal       = fatality indicator
+ *               podule_base = address of podule module was started from
+ *               pw          = private word for module
+ * On exit:      Return NULL for successful finalisation.
+ **************************************************************************/
+_kernel_oserror *Mod_Final(int fatal, int podule_base, void *pw)
+{
+    dprintf("Module MakeQRCode dying\n");
+    return NULL;
+}
+
+
+_kernel_oserror *SWI_Sprite(int swi, _kernel_swi_regs *r, void *pw)
+{
+    unsigned int out_len;
+    unsigned int width;
+    unsigned int height;
+    _kernel_oserror *err;
+
+    out_len = (unsigned int)r->r[4];
+    width = 0;
+    height = 0;
+
+    err = makeqrcode_sprite((unsigned int)r->r[0],
+                            (const char *)r->r[1],
+                            (const void *)r->r[2],
+                            (void *)r->r[3],
+                            &out_len,
+                            &width,
+                            &height);
+    r->r[1] = (int)width;
+    r->r[2] = (int)height;
+    r->r[4] = (int)out_len;
+    return err;
+}
+
+
+_kernel_oserror *SWI_Encode(int swi, _kernel_swi_regs *r, void *pw)
+{
+    unsigned int out_len;
+    _kernel_oserror *err;
+
+    out_len = (unsigned int)r->r[5];
+    err = makeqrcode_encode((unsigned int)r->r[0],
+                            (const void *)r->r[1],
+                            r->r[2],
+                            (const void *)r->r[3],
+                            (void *)r->r[4],
+                            &out_len);
+    r->r[5] = (int)out_len;
+    return err;
+}
+
+
+_kernel_oserror *SWI_Render(int swi, _kernel_swi_regs *r, void *pw)
+{
+    unsigned int out_len;
+    unsigned int width;
+    unsigned int height;
+    _kernel_oserror *err;
+
+    out_len = (unsigned int)r->r[4];
+    width = 0;
+    height = 0;
+
+    err = makeqrcode_render((unsigned int)r->r[0],
+                            (const void *)r->r[1],
+                            (const void *)r->r[2],
+                            (void *)r->r[3],
+                            &out_len,
+                            &width,
+                            &height);
+    r->r[1] = (int)width;
+    r->r[2] = (int)height;
+    r->r[4] = (int)out_len;
+    return err;
+}
+
+
+_kernel_oserror *SWI_EncodeSegments(int swi, _kernel_swi_regs *r, void *pw)
+{
+    unsigned int out_len;
+    _kernel_oserror *err;
+
+    out_len = (unsigned int)r->r[5];
+    err = makeqrcode_encode_segments((unsigned int)r->r[0],
+                                     (const void *)r->r[1],
+                                     (unsigned int)r->r[2],
+                                     (const void *)r->r[3],
+                                     (void *)r->r[4],
+                                     &out_len);
+    r->r[5] = (int)out_len;
+    return err;
+}
+
+
+_kernel_oserror *SWI_Info(int swi, _kernel_swi_regs *r, void *pw)
+{
+    if (r->r[0] != 0) {
+        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_FLAGS);
+    }
+
+    r->r[0] = 0;
+    r->r[1] = 40;
+    r->r[2] = 177;
+    r->r[3] = (1 << MAKEQRCODE_FORMAT_SPRITE_FILE) |
+              (1 << MAKEQRCODE_FORMAT_SPRITE) |
+              (1 << MAKEQRCODE_FORMAT_BITMAP);
+    r->r[4] = 64 + 3918;
+    return NULL;
+}

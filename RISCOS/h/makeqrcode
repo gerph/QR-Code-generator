@@ -1,0 +1,58 @@
+/*******************************************************************
+ * File:        makeqrcode
+ * Purpose:     MakeQRCode implementation interface
+ * Author:      Gerph
+ ******************************************************************/
+
+#ifndef MAKEQRCODE_H
+#define MAKEQRCODE_H
+
+#include "kernel.h"
+
+#define MAKEQRCODE_SWI_FLAG_RESERVED        0xfffffff0u
+#define MAKEQRCODE_ENCODE_BINARY            (1u << 0)
+#define MAKEQRCODE_SEGMENT_APPEND           (1u << 0)
+
+#define MAKEQRCODE_FORMAT_SPRITE_FILE       0u
+#define MAKEQRCODE_FORMAT_SPRITE            1u
+#define MAKEQRCODE_FORMAT_BITMAP            2u
+
+#define MAKEQRCODE_CONTROL_BOOST_ECC        (1u << 0)
+
+#define MAKEQRCODE_ERROR_BUFFER_OVERFLOW    0x000001e4u
+#define MAKEQRCODE_ERROR_BAD_FLAGS          0x009e9701u
+#define MAKEQRCODE_ERROR_BAD_PARAMETER      0x009e9702u
+#define MAKEQRCODE_ERROR_DATA_TOO_LONG      0x009e9703u
+#define MAKEQRCODE_ERROR_BAD_WORKSPACE      0x009e9704u
+#define MAKEQRCODE_ERROR_NO_MEMORY          0x009e9705u
+
+_kernel_oserror *makeqrcode_error(unsigned int number);
+
+_kernel_oserror *makeqrcode_sprite(unsigned int flags,
+                                   const char *text,
+                                   const void *controls,
+                                   void *output,
+                                   unsigned int *output_len,
+                                   unsigned int *width,
+                                   unsigned int *height);
+_kernel_oserror *makeqrcode_encode(unsigned int flags,
+                                   const void *input,
+                                   int input_len,
+                                   const void *controls,
+                                   void *output,
+                                   unsigned int *output_len);
+_kernel_oserror *makeqrcode_render(unsigned int flags,
+                                   const void *workspace,
+                                   const void *controls,
+                                   void *output,
+                                   unsigned int *output_len,
+                                   unsigned int *width,
+                                   unsigned int *height);
+_kernel_oserror *makeqrcode_encode_segments(unsigned int flags,
+                                            const void *segments,
+                                            unsigned int count,
+                                            const void *controls,
+                                            void *output,
+                                            unsigned int *output_len);
+
+#endif
