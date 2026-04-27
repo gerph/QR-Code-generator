@@ -19,15 +19,6 @@
 
 #define MAKEQRCODE_CONTROL_BOOST_ECC        (1u << 0)
 
-#define MAKEQRCODE_ERROR_BUFFER_OVERFLOW    0x000001e4u
-#define MAKEQRCODE_ERROR_BAD_FLAGS          0x009e9701u
-#define MAKEQRCODE_ERROR_BAD_PARAMETER      0x009e9702u
-#define MAKEQRCODE_ERROR_DATA_TOO_LONG      0x009e9703u
-#define MAKEQRCODE_ERROR_BAD_WORKSPACE      0x009e9704u
-#define MAKEQRCODE_ERROR_NO_MEMORY          0x009e9705u
-
-_kernel_oserror *makeqrcode_error(unsigned int number);
-
 _kernel_oserror *makeqrcode_sprite(unsigned int flags,
                                    const char *text,
                                    const void *controls,

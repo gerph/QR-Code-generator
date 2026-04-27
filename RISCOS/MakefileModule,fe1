@@ -38,7 +38,7 @@ include CModule
 
 # Additional dependencies
 $(OZDIR).module: h.modhead h.makeqrcode
-$(OZDIR).makeqrcode: h.makeqrcode h.qrcodegen
+$(OZDIR).makeqrcode: h.modhead h.makeqrcode h.qrcodegen
 
 # Export rules
 ${EXP_C_H}.${COMPONENT}SWIs: cmhg.modhead

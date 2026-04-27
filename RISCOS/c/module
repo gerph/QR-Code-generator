@@ -137,7 +137,7 @@ _kernel_oserror *SWI_EncodeSegments(int swi, _kernel_swi_regs *r, void *pw)
 _kernel_oserror *SWI_Info(int swi, _kernel_swi_regs *r, void *pw)
 {
     if (r->r[0] != 0) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_FLAGS);
+        return err_BadFlags;
     }
 
     r->r[0] = 0;

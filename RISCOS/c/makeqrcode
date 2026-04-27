@@ -9,6 +9,7 @@
 
 #include "kernel.h"
 #include "qrcodegen.h"
+#include "modhead.h"
 #include "makeqrcode.h"
 
 #define MQ_MAGIC                    0x4352514du
@@ -55,30 +56,6 @@ typedef struct segment_record {
     unsigned int data_len;
     const unsigned char *data;
 } segment_record;
-
-static _kernel_oserror errors[] = {
-    { MAKEQRCODE_ERROR_BUFFER_OVERFLOW, "Buffer overflow" },
-    { MAKEQRCODE_ERROR_BAD_FLAGS, "Bad flags" },
-    { MAKEQRCODE_ERROR_BAD_PARAMETER, "Bad parameter" },
-    { MAKEQRCODE_ERROR_DATA_TOO_LONG, "Data too long" },
-    { MAKEQRCODE_ERROR_BAD_WORKSPACE, "Bad workspace block" },
-    { MAKEQRCODE_ERROR_NO_MEMORY, "Not enough memory" }
-};
-
-
-_kernel_oserror *makeqrcode_error(unsigned int number)
-{
-    unsigned int i;
-
-    for (i = 0; i < sizeof(errors) / sizeof(errors[0]); i++) {
-        if ((unsigned int)errors[i].errnum == number) {
-            return &errors[i];
-        }
-    }
-
-    return &errors[2];
-}
-
 
 static unsigned int align4(unsigned int value)
 {
@@ -384,7 +361,7 @@ static _kernel_oserror *ensure_buffer(void *output,
         return NULL;
     }
     if (supplied < required) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BUFFER_OVERFLOW);
+        return err_BufferOverflow;
     }
     return NULL;
 }
@@ -403,19 +380,19 @@ static _kernel_oserror *encode_text_or_binary(unsigned int flags,
     size_t len;
 
     if (input == NULL) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+        return err_BadParameter;
     }
 
     buffer_len = qrcodegen_BUFFER_LEN_FOR_VERSION(control->max_version);
     temp = malloc(buffer_len);
     if (temp == NULL) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_NO_MEMORY);
+        return err_NoMemory;
     }
 
     if ((flags & MAKEQRCODE_ENCODE_BINARY) != 0) {
         if (input_len < 0 || (unsigned int)input_len > buffer_len) {
             free(temp);
-            return makeqrcode_error(MAKEQRCODE_ERROR_DATA_TOO_LONG);
+            return err_DataTooLong;
         }
         memcpy(temp, input, (size_t)input_len);
         ok = qrcodegen_encodeBinary(temp, (size_t)input_len, qrcode,
@@ -440,7 +417,7 @@ static _kernel_oserror *encode_text_or_binary(unsigned int flags,
             text_copy = malloc(len + 1);
             if (text_copy == NULL) {
                 free(temp);
-                return makeqrcode_error(MAKEQRCODE_ERROR_NO_MEMORY);
+                return err_NoMemory;
             }
             memcpy(text_copy, input, len);
             text_copy[len] = '\0';
@@ -453,13 +430,13 @@ static _kernel_oserror *encode_text_or_binary(unsigned int flags,
             free(text_copy);
         } else {
             free(temp);
-            return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+            return err_BadParameter;
         }
     }
 
     free(temp);
     if (!ok) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_DATA_TOO_LONG);
+        return err_DataTooLong;
     }
 
     *qr_len = qrcodegen_BUFFER_LEN_FOR_VERSION((qrcodegen_getSize(qrcode) - 17) / 4);
@@ -482,12 +459,12 @@ static _kernel_oserror *write_qr_workspace(unsigned int flags,
     _kernel_oserror *err;
 
     if ((flags & ~MAKEQRCODE_ENCODE_BINARY) != 0) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_FLAGS);
+        return err_BadFlags;
     }
 
     read_encode_control(controls, &control);
     if (!valid_encode_control(&control)) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+        return err_BadParameter;
     }
 
     err = encode_text_or_binary(flags, input, input_len, &control, qrcode, &qr_len);
@@ -676,7 +653,7 @@ static _kernel_oserror *render_qrcode(unsigned int format,
     } else if (format == MAKEQRCODE_FORMAT_BITMAP) {
         required = bitmap_stride(*width, control->row_alignment) * *height;
     } else {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_FLAGS);
+        return err_BadFlags;
     }
 
     err = ensure_buffer(output, supplied, required, output_len);
@@ -707,12 +684,12 @@ static _kernel_oserror *read_segment_descriptor(const void *segments,
     desc = (const unsigned char *)segments + (index * 24u);
     size = get_word(desc, 0);
     if (size < 24u) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+        return err_BadParameter;
     }
 
     flags = get_word(desc, 20);
     if (flags != 0) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_FLAGS);
+        return err_BadFlags;
     }
 
     record->mode = get_word(desc, 4);
@@ -724,13 +701,13 @@ static _kernel_oserror *read_segment_descriptor(const void *segments,
         record->char_count = 0;
         record->data_len = 0;
         if (record->value >= 1000000u) {
-            return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+            return err_BadParameter;
         }
     } else {
         record->data_len = record->value;
         if (record->mode == qrcodegen_Mode_KANJI) {
             if ((record->data_len & 1u) != 0) {
-                return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+                return err_BadParameter;
             }
             if (record->char_count == 0) {
                 record->char_count = record->data_len / 2u;
@@ -739,7 +716,7 @@ static _kernel_oserror *read_segment_descriptor(const void *segments,
             record->char_count = record->value;
         }
         if (record->data == NULL && record->data_len != 0) {
-            return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+            return err_BadParameter;
         }
     }
 
@@ -748,7 +725,7 @@ static _kernel_oserror *read_segment_descriptor(const void *segments,
         record->mode != qrcodegen_Mode_BYTE &&
         record->mode != qrcodegen_Mode_ECI &&
         record->mode != qrcodegen_Mode_KANJI) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+        return err_BadParameter;
     }
 
     return NULL;
@@ -842,7 +819,7 @@ static _kernel_oserror *make_qrcode_segments(const void *workspace,
     _kernel_oserror *err;
 
     if (!valid_workspace(workspace) || get_word(workspace, 8) != MQ_KIND_SEGMENTS) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_WORKSPACE);
+        return err_BadWorkspaceBlock;
     }
 
     count = get_word(workspace, 36);
@@ -868,7 +845,7 @@ static _kernel_oserror *make_qrcode_segments(const void *workspace,
         free(buffers);
         free(text_buffers);
         free(temp);
-        return makeqrcode_error(MAKEQRCODE_ERROR_NO_MEMORY);
+        return err_NoMemory;
     }
 
     for (i = 0; i < count; i++) {
@@ -881,7 +858,7 @@ static _kernel_oserror *make_qrcode_segments(const void *workspace,
     err = NULL;
     for (i = 0; i < count && err == NULL; i++) {
         if (p + MQ_SEGMENT_RECORD_SIZE > end) {
-            err = makeqrcode_error(MAKEQRCODE_ERROR_BAD_WORKSPACE);
+            err = err_BadWorkspaceBlock;
             break;
         }
         mode = get_word(p, 0);
@@ -890,45 +867,45 @@ static _kernel_oserror *make_qrcode_segments(const void *workspace,
         data_len = get_word(p, 12);
         p += MQ_SEGMENT_RECORD_SIZE;
         if (p + align4(data_len) > end) {
-            err = makeqrcode_error(MAKEQRCODE_ERROR_BAD_WORKSPACE);
+            err = err_BadWorkspaceBlock;
             break;
         }
 
         buf_size = qrcodegen_calcSegmentBufferSize((enum qrcodegen_Mode)mode,
                                                    char_count);
         if (buf_size == SIZE_MAX) {
-            err = makeqrcode_error(MAKEQRCODE_ERROR_DATA_TOO_LONG);
+            err = err_DataTooLong;
             break;
         }
         buffers[i] = malloc(buf_size + 1);
         if (buffers[i] == NULL) {
-            err = makeqrcode_error(MAKEQRCODE_ERROR_NO_MEMORY);
+            err = err_NoMemory;
             break;
         }
 
         if (mode == qrcodegen_Mode_NUMERIC) {
             text_buffers[i] = malloc(data_len + 1);
             if (text_buffers[i] == NULL) {
-                err = makeqrcode_error(MAKEQRCODE_ERROR_NO_MEMORY);
+                err = err_NoMemory;
                 break;
             }
             memcpy(text_buffers[i], p, data_len);
             text_buffers[i][data_len] = 0;
             if (!qrcodegen_isNumeric((const char *)text_buffers[i])) {
-                err = makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+                err = err_BadParameter;
                 break;
             }
             segs[i] = qrcodegen_makeNumeric((const char *)text_buffers[i], buffers[i]);
         } else if (mode == qrcodegen_Mode_ALPHANUMERIC) {
             text_buffers[i] = malloc(data_len + 1);
             if (text_buffers[i] == NULL) {
-                err = makeqrcode_error(MAKEQRCODE_ERROR_NO_MEMORY);
+                err = err_NoMemory;
                 break;
             }
             memcpy(text_buffers[i], p, data_len);
             text_buffers[i][data_len] = 0;
             if (!qrcodegen_isAlphanumeric((const char *)text_buffers[i])) {
-                err = makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+                err = err_BadParameter;
                 break;
             }
             segs[i] = qrcodegen_makeAlphanumeric((const char *)text_buffers[i], buffers[i]);
@@ -938,11 +915,11 @@ static _kernel_oserror *make_qrcode_segments(const void *workspace,
             segs[i] = qrcodegen_makeEci((long)value, buffers[i]);
         } else if (mode == qrcodegen_Mode_KANJI) {
             if (!make_kanji_segment(p, data_len, buffers[i], &segs[i])) {
-                err = makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+                err = err_BadParameter;
                 break;
             }
         } else {
-            err = makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+            err = err_BadParameter;
             break;
         }
 
@@ -958,7 +935,7 @@ static _kernel_oserror *make_qrcode_segments(const void *workspace,
                                               (control.flags & MAKEQRCODE_CONTROL_BOOST_ECC) != 0,
                                               temp, qrcode);
         if (!ok) {
-            err = makeqrcode_error(MAKEQRCODE_ERROR_DATA_TOO_LONG);
+            err = err_DataTooLong;
         }
     }
 
@@ -981,7 +958,7 @@ static _kernel_oserror *workspace_qrcode(const void *workspace,
     unsigned int qr_len;
 
     if (!valid_workspace(workspace)) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_WORKSPACE);
+        return err_BadWorkspaceBlock;
     }
 
     kind = get_word(workspace, 8);
@@ -1010,7 +987,7 @@ _kernel_oserror *makeqrcode_render(unsigned int flags,
 
     format = flags & 0xfu;
     if ((flags & 0xfffffff0u) != 0) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_FLAGS);
+        return err_BadFlags;
     }
 
     supplied = *output_len;
@@ -1041,13 +1018,13 @@ _kernel_oserror *makeqrcode_sprite(unsigned int flags,
     _kernel_oserror *err;
 
     if (flags != 0) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_FLAGS);
+        return err_BadFlags;
     }
 
     supplied = *output_len;
     read_sprite_control(controls, &enc, &render);
     if (!valid_encode_control(&enc)) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+        return err_BadParameter;
     }
 
     err = encode_text_or_binary(0, text, -1, &enc, qrcode, &qr_len);
@@ -1086,10 +1063,10 @@ _kernel_oserror *makeqrcode_encode_segments(unsigned int flags,
     _kernel_oserror *err;
 
     if ((flags & ~MAKEQRCODE_SEGMENT_APPEND) != 0) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_FLAGS);
+        return err_BadFlags;
     }
     if (segments == NULL && count != 0) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+        return err_BadParameter;
     }
 
     supplied = *output_len;
@@ -1101,7 +1078,7 @@ _kernel_oserror *makeqrcode_encode_segments(unsigned int flags,
     if ((flags & MAKEQRCODE_SEGMENT_APPEND) == 0) {
         read_encode_control(controls, &control);
         if (!valid_encode_control(&control)) {
-            return makeqrcode_error(MAKEQRCODE_ERROR_BAD_PARAMETER);
+            return err_BadParameter;
         }
         existing_size = MQ_HEADER_SIZE;
         existing_count = 0;
@@ -1109,7 +1086,7 @@ _kernel_oserror *makeqrcode_encode_segments(unsigned int flags,
         required = existing_size + new_bytes;
     } else {
         if (!valid_workspace(output) || get_word(output, 8) != MQ_KIND_SEGMENTS) {
-            return makeqrcode_error(MAKEQRCODE_ERROR_BAD_WORKSPACE);
+            return err_BadWorkspaceBlock;
         }
         control.ecc = get_word(output, 12);
         control.min_version = get_word(output, 16);
@@ -1126,7 +1103,7 @@ _kernel_oserror *makeqrcode_encode_segments(unsigned int flags,
     if (output == NULL || supplied == 0) {
         temp = malloc(required);
         if (temp == NULL) {
-            return makeqrcode_error(MAKEQRCODE_ERROR_NO_MEMORY);
+            return err_NoMemory;
         }
         if ((flags & MAKEQRCODE_SEGMENT_APPEND) != 0) {
             memcpy(temp, output, existing_size);
@@ -1145,7 +1122,7 @@ _kernel_oserror *makeqrcode_encode_segments(unsigned int flags,
     }
 
     if (supplied < required) {
-        return makeqrcode_error(MAKEQRCODE_ERROR_BUFFER_OVERFLOW);
+        return err_BufferOverflow;
     }
 
     if ((flags & MAKEQRCODE_SEGMENT_APPEND) == 0) {
