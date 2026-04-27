@@ -1,0 +1,1149 @@
+/*******************************************************************
+ * File:        makeqrcode
+ * Purpose:     MakeQRCode encoding and rendering implementation
+ * Author:      Gerph
+ ******************************************************************/
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "kernel.h"
+#include "qrcodegen.h"
+#include "modhead.h"
+#include "makeqrcode.h"
+
+#define MQ_MAGIC                    0x4352514du
+#define MQ_KIND_QR                  1u
+#define MQ_KIND_SEGMENTS            2u
+
+#define MQ_HEADER_SIZE              44u
+#define MQ_SEGMENT_RECORD_SIZE      16u
+
+#define MQ_DEFAULT_ECC              qrcodegen_Ecc_QUARTILE
+#define MQ_DEFAULT_MIN_VERSION      qrcodegen_VERSION_MIN
+#define MQ_DEFAULT_MAX_VERSION      qrcodegen_VERSION_MAX
+#define MQ_DEFAULT_MASK             qrcodegen_Mask_AUTO
+#define MQ_DEFAULT_ENCODE_FLAGS     MAKEQRCODE_CONTROL_BOOST_ECC
+#define MQ_DEFAULT_BORDER           4u
+#define MQ_DEFAULT_FG               0x00000010u
+#define MQ_DEFAULT_BG               0xffffff10u
+#define MQ_DEFAULT_ALIGNMENT        4u
+
+#define MQ_SPRITE_HEADER_SIZE       44u
+#define MQ_SPRITE_PALETTE_SIZE      16u
+#define MQ_SPRITE_FILE_HEADER_SIZE  12u
+#define MQ_SPRITE_FILE_OFFSET_BIAS  4u
+
+typedef struct encode_control {
+    unsigned int ecc;
+    unsigned int min_version;
+    unsigned int max_version;
+    int mask;
+    unsigned int flags;
+} encode_control;
+
+typedef struct render_control {
+    unsigned int fg;
+    unsigned int bg;
+    unsigned int border;
+    char name[12];
+    unsigned int row_alignment;
+} render_control;
+
+typedef struct segment_record {
+    unsigned int mode;
+    unsigned int value;
+    unsigned int char_count;
+    unsigned int data_len;
+    const unsigned char *data;
+} segment_record;
+
+static unsigned int align4(unsigned int value)
+{
+    return (value + 3u) & ~3u;
+}
+
+
+static unsigned int get_word(const void *base, unsigned int offset)
+{
+    const unsigned char *p;
+
+    p = (const unsigned char *)base + offset;
+    return ((unsigned int)p[0]) |
+           ((unsigned int)p[1] << 8) |
+           ((unsigned int)p[2] << 16) |
+           ((unsigned int)p[3] << 24);
+}
+
+
+static void put_word(void *base, unsigned int offset, unsigned int value)
+{
+    unsigned char *p;
+
+    p = (unsigned char *)base + offset;
+    p[0] = (unsigned char)(value & 0xffu);
+    p[1] = (unsigned char)((value >> 8) & 0xffu);
+    p[2] = (unsigned char)((value >> 16) & 0xffu);
+    p[3] = (unsigned char)((value >> 24) & 0xffu);
+}
+
+
+static unsigned int block_size(const void *block)
+{
+    if (block == NULL) {
+        return 0;
+    }
+    return get_word(block, 0);
+}
+
+
+static void default_name(char name[12])
+{
+    memset(name, 0, 12);
+    memcpy(name, "qrcode", 6);
+}
+
+
+static int valid_encode_control(const encode_control *control)
+{
+    if (control->ecc > 3u) {
+        return 0;
+    }
+    if (control->min_version < qrcodegen_VERSION_MIN ||
+        control->min_version > qrcodegen_VERSION_MAX) {
+        return 0;
+    }
+    if (control->max_version < qrcodegen_VERSION_MIN ||
+        control->max_version > qrcodegen_VERSION_MAX) {
+        return 0;
+    }
+    if (control->min_version > control->max_version) {
+        return 0;
+    }
+    if (control->mask != qrcodegen_Mask_AUTO &&
+        (control->mask < 0 || control->mask > 7)) {
+        return 0;
+    }
+    if ((control->flags & ~MAKEQRCODE_CONTROL_BOOST_ECC) != 0) {
+        return 0;
+    }
+    return 1;
+}
+
+
+static void read_encode_control(const void *block, encode_control *control)
+{
+    unsigned int size;
+
+    control->ecc = MQ_DEFAULT_ECC;
+    control->min_version = MQ_DEFAULT_MIN_VERSION;
+    control->max_version = MQ_DEFAULT_MAX_VERSION;
+    control->mask = MQ_DEFAULT_MASK;
+    control->flags = MQ_DEFAULT_ENCODE_FLAGS;
+
+    if (block == NULL) {
+        return;
+    }
+
+    size = block_size(block);
+    if (size >= 8u) {
+        control->ecc = get_word(block, 4);
+    }
+    if (size >= 12u) {
+        control->min_version = get_word(block, 8);
+    }
+    if (size >= 16u) {
+        control->max_version = get_word(block, 12);
+    }
+    if (size >= 20u) {
+        control->mask = (int)get_word(block, 16);
+    }
+    if (size >= 24u) {
+        control->flags = get_word(block, 20);
+    }
+}
+
+
+static void read_sprite_control(const void *block,
+                                encode_control *enc,
+                                render_control *render)
+{
+    unsigned int size;
+
+    read_encode_control(NULL, enc);
+    render->fg = MQ_DEFAULT_FG;
+    render->bg = MQ_DEFAULT_BG;
+    render->border = MQ_DEFAULT_BORDER;
+    render->row_alignment = MQ_DEFAULT_ALIGNMENT;
+    default_name(render->name);
+
+    if (block == NULL) {
+        return;
+    }
+
+    size = block_size(block);
+    if (size >= 8u) {
+        render->fg = get_word(block, 4);
+    }
+    if (size >= 12u) {
+        render->bg = get_word(block, 8);
+    }
+    if (size >= 16u) {
+        render->border = get_word(block, 12);
+    }
+    if (size >= 28u) {
+        memcpy(render->name, (const unsigned char *)block + 16, 12);
+    }
+    if (size >= 32u) {
+        enc->ecc = get_word(block, 28);
+    }
+    if (size >= 36u) {
+        enc->min_version = get_word(block, 32);
+    }
+    if (size >= 40u) {
+        enc->max_version = get_word(block, 36);
+    }
+    if (size >= 44u) {
+        enc->mask = (int)get_word(block, 40);
+    }
+    if (size >= 48u) {
+        enc->flags = get_word(block, 44);
+    }
+}
+
+
+static void read_render_control(const void *block, render_control *render)
+{
+    unsigned int size;
+
+    render->fg = MQ_DEFAULT_FG;
+    render->bg = MQ_DEFAULT_BG;
+    render->border = MQ_DEFAULT_BORDER;
+    render->row_alignment = MQ_DEFAULT_ALIGNMENT;
+    default_name(render->name);
+
+    if (block == NULL) {
+        return;
+    }
+
+    size = block_size(block);
+    if (size >= 8u) {
+        render->fg = get_word(block, 4);
+    }
+    if (size >= 12u) {
+        render->bg = get_word(block, 8);
+    }
+    if (size >= 16u) {
+        render->border = get_word(block, 12);
+    }
+    if (size >= 28u) {
+        memcpy(render->name, (const unsigned char *)block + 16, 12);
+    }
+    if (size >= 32u) {
+        render->row_alignment = get_word(block, 28);
+        if (render->row_alignment == 0) {
+            render->row_alignment = MQ_DEFAULT_ALIGNMENT;
+        }
+    }
+}
+
+
+static void write_header(void *workspace,
+                         unsigned int total_size,
+                         unsigned int kind,
+                         const encode_control *control,
+                         unsigned int qr_len,
+                         unsigned int seg_count,
+                         unsigned int payload_len)
+{
+    put_word(workspace, 0, total_size);
+    put_word(workspace, 4, MQ_MAGIC);
+    put_word(workspace, 8, kind);
+    put_word(workspace, 12, control->ecc);
+    put_word(workspace, 16, control->min_version);
+    put_word(workspace, 20, control->max_version);
+    put_word(workspace, 24, (unsigned int)control->mask);
+    put_word(workspace, 28, control->flags);
+    put_word(workspace, 32, qr_len);
+    put_word(workspace, 36, seg_count);
+    put_word(workspace, 40, payload_len);
+}
+
+
+static void append_bits(unsigned int value,
+                        unsigned int count,
+                        unsigned char *buffer,
+                        int *bit_len)
+{
+    unsigned int i;
+    unsigned int bit;
+
+    for (i = 0; i < count; i++) {
+        bit = (value >> (count - 1u - i)) & 1u;
+        if (bit != 0) {
+            buffer[(unsigned int)*bit_len >> 3] |=
+                (unsigned char)(0x80u >> ((unsigned int)*bit_len & 7u));
+        }
+        (*bit_len)++;
+    }
+}
+
+
+static int make_kanji_segment(const unsigned char *data,
+                              unsigned int data_len,
+                              unsigned char *buffer,
+                              struct qrcodegen_Segment *segment)
+{
+    unsigned int i;
+    unsigned int value;
+    unsigned int sub;
+
+    if ((data_len & 1u) != 0) {
+        return 0;
+    }
+
+    memset(buffer, 0, (data_len / 2u * 13u + 7u) / 8u);
+    segment->mode = qrcodegen_Mode_KANJI;
+    segment->numChars = (int)(data_len / 2u);
+    segment->bitLength = 0;
+    segment->data = buffer;
+
+    for (i = 0; i < data_len; i += 2u) {
+        value = ((unsigned int)data[i] << 8) | (unsigned int)data[i + 1u];
+        if (value >= 0x8140u && value <= 0x9ffcu) {
+            sub = value - 0x8140u;
+        } else if (value >= 0xe040u && value <= 0xebbfu) {
+            sub = value - 0xc140u;
+        } else {
+            return 0;
+        }
+        append_bits(((sub >> 8) * 0xc0u) + (sub & 0xffu),
+                    13u, buffer, &segment->bitLength);
+    }
+
+    return 1;
+}
+
+
+static int valid_workspace(const void *workspace)
+{
+    unsigned int size;
+    unsigned int kind;
+
+    if (workspace == NULL) {
+        return 0;
+    }
+
+    size = get_word(workspace, 0);
+    kind = get_word(workspace, 8);
+    if (size < MQ_HEADER_SIZE) {
+        return 0;
+    }
+    if (get_word(workspace, 4) != MQ_MAGIC) {
+        return 0;
+    }
+    if (kind != MQ_KIND_QR && kind != MQ_KIND_SEGMENTS) {
+        return 0;
+    }
+    if (MQ_HEADER_SIZE + get_word(workspace, 32) > size) {
+        return 0;
+    }
+    return 1;
+}
+
+
+static _kernel_oserror *ensure_buffer(void *output,
+                                      unsigned int supplied,
+                                      unsigned int required,
+                                      unsigned int *output_len)
+{
+    *output_len = required;
+    if (output == NULL || supplied == 0) {
+        return NULL;
+    }
+    if (supplied < required) {
+        return err_BufferOverflow;
+    }
+    return NULL;
+}
+
+
+static _kernel_oserror *encode_text_or_binary(unsigned int flags,
+                                              const void *input,
+                                              int input_len,
+                                              const encode_control *control,
+                                              unsigned char *qrcode,
+                                              unsigned int *qr_len)
+{
+    unsigned int buffer_len;
+    unsigned char *temp;
+    int ok;
+    size_t len;
+
+    if (input == NULL) {
+        return err_BadParameter;
+    }
+
+    buffer_len = qrcodegen_BUFFER_LEN_FOR_VERSION(control->max_version);
+    temp = malloc(buffer_len);
+    if (temp == NULL) {
+        return err_NoMemory;
+    }
+
+    if ((flags & MAKEQRCODE_ENCODE_BINARY) != 0) {
+        if (input_len < 0 || (unsigned int)input_len > buffer_len) {
+            free(temp);
+            return err_DataTooLong;
+        }
+        memcpy(temp, input, (size_t)input_len);
+        ok = qrcodegen_encodeBinary(temp, (size_t)input_len, qrcode,
+                                    (enum qrcodegen_Ecc)control->ecc,
+                                    (int)control->min_version,
+                                    (int)control->max_version,
+                                    (enum qrcodegen_Mask)control->mask,
+                                    (control->flags & MAKEQRCODE_CONTROL_BOOST_ECC) != 0);
+    } else {
+        if (input_len == -1) {
+            len = strlen((const char *)input);
+            ok = qrcodegen_encodeText((const char *)input, temp, qrcode,
+                                      (enum qrcodegen_Ecc)control->ecc,
+                                      (int)control->min_version,
+                                      (int)control->max_version,
+                                      (enum qrcodegen_Mask)control->mask,
+                                      (control->flags & MAKEQRCODE_CONTROL_BOOST_ECC) != 0);
+        } else if (input_len >= 0) {
+            char *text_copy;
+
+            len = (size_t)input_len;
+            text_copy = malloc(len + 1);
+            if (text_copy == NULL) {
+                free(temp);
+                return err_NoMemory;
+            }
+            memcpy(text_copy, input, len);
+            text_copy[len] = '\0';
+            ok = qrcodegen_encodeText(text_copy, temp, qrcode,
+                                      (enum qrcodegen_Ecc)control->ecc,
+                                      (int)control->min_version,
+                                      (int)control->max_version,
+                                      (enum qrcodegen_Mask)control->mask,
+                                      (control->flags & MAKEQRCODE_CONTROL_BOOST_ECC) != 0);
+            free(text_copy);
+        } else {
+            free(temp);
+            return err_BadParameter;
+        }
+    }
+
+    free(temp);
+    if (!ok) {
+        return err_DataTooLong;
+    }
+
+    *qr_len = qrcodegen_BUFFER_LEN_FOR_VERSION((qrcodegen_getSize(qrcode) - 17) / 4);
+    return NULL;
+}
+
+
+static _kernel_oserror *write_qr_workspace(unsigned int flags,
+                                           const void *input,
+                                           int input_len,
+                                           const void *controls,
+                                           void *output,
+                                           unsigned int supplied,
+                                           unsigned int *output_len)
+{
+    encode_control control;
+    unsigned char qrcode[qrcodegen_BUFFER_LEN_MAX];
+    unsigned int qr_len;
+    unsigned int required;
+    _kernel_oserror *err;
+
+    if ((flags & ~MAKEQRCODE_ENCODE_BINARY) != 0) {
+        return err_BadFlags;
+    }
+
+    read_encode_control(controls, &control);
+    if (!valid_encode_control(&control)) {
+        return err_BadParameter;
+    }
+
+    err = encode_text_or_binary(flags, input, input_len, &control, qrcode, &qr_len);
+    if (err != NULL) {
+        return err;
+    }
+
+    required = MQ_HEADER_SIZE + qr_len;
+    err = ensure_buffer(output, supplied, required, output_len);
+    if (err != NULL || output == NULL || supplied == 0) {
+        return err;
+    }
+
+    write_header(output, required, MQ_KIND_QR, &control, qr_len, 0, 0);
+    memcpy((unsigned char *)output + MQ_HEADER_SIZE, qrcode, qr_len);
+    return NULL;
+}
+
+
+_kernel_oserror *makeqrcode_encode(unsigned int flags,
+                                   const void *input,
+                                   int input_len,
+                                   const void *controls,
+                                   void *output,
+                                   unsigned int *output_len)
+{
+    return write_qr_workspace(flags, input, input_len, controls,
+                              output, *output_len, output_len);
+}
+
+
+static unsigned int sprite_image_bytes(unsigned int width, unsigned int height)
+{
+    unsigned int width_words;
+
+    width_words = (width + 31u) / 32u;
+    return width_words * 4u * height;
+}
+
+
+static unsigned int sprite_size(unsigned int width, unsigned int height)
+{
+    return MQ_SPRITE_HEADER_SIZE + MQ_SPRITE_PALETTE_SIZE +
+           sprite_image_bytes(width, height);
+}
+
+
+static unsigned int bitmap_stride(unsigned int width, unsigned int alignment)
+{
+    unsigned int bytes;
+
+    bytes = (width + 7u) / 8u;
+    if (alignment > 1u) {
+        bytes = ((bytes + alignment - 1u) / alignment) * alignment;
+    }
+    return bytes;
+}
+
+
+static void write_sprite_image(unsigned char *out,
+                               const unsigned char *qrcode,
+                               unsigned int border,
+                               unsigned int width,
+                               unsigned int height)
+{
+    unsigned int x;
+    unsigned int y;
+    unsigned int offset;
+    unsigned int word;
+
+    offset = 0;
+    for (y = 0; y < height; y++) {
+        word = 0;
+        for (x = 0; x < width; x++) {
+            if (x != 0 && (x & 31u) == 0) {
+                put_word(out, offset, word);
+                offset += 4u;
+                word = 0;
+            }
+            if (qrcodegen_getModule(qrcode, (int)x - (int)border,
+                                    (int)y - (int)border)) {
+                word |= 1u << (x & 31u);
+            }
+        }
+        put_word(out, offset, word);
+        offset += 4u;
+    }
+}
+
+
+static void write_single_sprite(unsigned char *out,
+                                const unsigned char *qrcode,
+                                const render_control *control,
+                                unsigned int width,
+                                unsigned int height)
+{
+    unsigned int width_words;
+    unsigned int image_len;
+
+    width_words = (width + 31u) / 32u;
+    image_len = sprite_image_bytes(width, height);
+    put_word(out, 0, MQ_SPRITE_HEADER_SIZE + MQ_SPRITE_PALETTE_SIZE + image_len);
+    memcpy(out + 4, control->name, 12);
+    put_word(out, 16, width_words - 1u);
+    put_word(out, 20, height - 1u);
+    put_word(out, 24, 0);
+    put_word(out, 28, (width - 1u) & 31u);
+    put_word(out, 32, MQ_SPRITE_HEADER_SIZE + MQ_SPRITE_PALETTE_SIZE);
+    put_word(out, 36, MQ_SPRITE_HEADER_SIZE + MQ_SPRITE_PALETTE_SIZE);
+    put_word(out, 40, 18);
+    put_word(out, 44, control->bg);
+    put_word(out, 48, control->bg);
+    put_word(out, 52, control->fg);
+    put_word(out, 56, control->fg);
+    write_sprite_image(out + MQ_SPRITE_HEADER_SIZE + MQ_SPRITE_PALETTE_SIZE,
+                       qrcode, control->border, width, height);
+}
+
+
+static void write_sprite_file(unsigned char *out,
+                              const unsigned char *qrcode,
+                              const render_control *control,
+                              unsigned int width,
+                              unsigned int height)
+{
+    unsigned int single_len;
+
+    single_len = sprite_size(width, height);
+    put_word(out, 0, 1);
+    put_word(out, 4, MQ_SPRITE_FILE_HEADER_SIZE + MQ_SPRITE_FILE_OFFSET_BIAS);
+    put_word(out, 8, MQ_SPRITE_FILE_HEADER_SIZE + single_len + MQ_SPRITE_FILE_OFFSET_BIAS);
+    write_single_sprite(out + MQ_SPRITE_FILE_HEADER_SIZE,
+                        qrcode, control, width, height);
+}
+
+
+static void write_bitmap(unsigned char *out,
+                         const unsigned char *qrcode,
+                         const render_control *control,
+                         unsigned int width,
+                         unsigned int height)
+{
+    unsigned int stride;
+    unsigned int x;
+    unsigned int y;
+    unsigned int byte;
+    unsigned int bit;
+
+    stride = bitmap_stride(width, control->row_alignment);
+    memset(out, 0, stride * height);
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++) {
+            if (qrcodegen_getModule(qrcode, (int)x - (int)control->border,
+                                    (int)y - (int)control->border)) {
+                byte = y * stride + x / 8u;
+                bit = x & 7u;
+                out[byte] |= (unsigned char)(1u << bit);
+            }
+        }
+    }
+}
+
+
+static _kernel_oserror *render_qrcode(unsigned int format,
+                                      const unsigned char *qrcode,
+                                      const render_control *control,
+                                      void *output,
+                                      unsigned int supplied,
+                                      unsigned int *output_len,
+                                      unsigned int *width,
+                                      unsigned int *height)
+{
+    unsigned int qr_size;
+    unsigned int required;
+    _kernel_oserror *err;
+
+    qr_size = (unsigned int)qrcodegen_getSize(qrcode);
+    *width = qr_size + (control->border * 2u);
+    *height = *width;
+
+    if (format == MAKEQRCODE_FORMAT_SPRITE_FILE) {
+        required = MQ_SPRITE_FILE_HEADER_SIZE + sprite_size(*width, *height);
+    } else if (format == MAKEQRCODE_FORMAT_SPRITE) {
+        required = sprite_size(*width, *height);
+    } else if (format == MAKEQRCODE_FORMAT_BITMAP) {
+        required = bitmap_stride(*width, control->row_alignment) * *height;
+    } else {
+        return err_BadFlags;
+    }
+
+    err = ensure_buffer(output, supplied, required, output_len);
+    if (err != NULL || output == NULL || supplied == 0) {
+        return err;
+    }
+
+    if (format == MAKEQRCODE_FORMAT_SPRITE_FILE) {
+        write_sprite_file(output, qrcode, control, *width, *height);
+    } else if (format == MAKEQRCODE_FORMAT_SPRITE) {
+        write_single_sprite(output, qrcode, control, *width, *height);
+    } else {
+        write_bitmap(output, qrcode, control, *width, *height);
+    }
+
+    return NULL;
+}
+
+
+static _kernel_oserror *read_segment_descriptor(const void *segments,
+                                                unsigned int index,
+                                                segment_record *record)
+{
+    const unsigned char *desc;
+    unsigned int size;
+    unsigned int flags;
+
+    desc = (const unsigned char *)segments + (index * 24u);
+    size = get_word(desc, 0);
+    if (size < 24u) {
+        return err_BadParameter;
+    }
+
+    flags = get_word(desc, 20);
+    if (flags != 0) {
+        return err_BadFlags;
+    }
+
+    record->mode = get_word(desc, 4);
+    record->data = (const unsigned char *)get_word(desc, 8);
+    record->value = get_word(desc, 12);
+    record->char_count = get_word(desc, 16);
+
+    if (record->mode == qrcodegen_Mode_ECI) {
+        record->char_count = 0;
+        record->data_len = 0;
+        if (record->value >= 1000000u) {
+            return err_BadParameter;
+        }
+    } else {
+        record->data_len = record->value;
+        if (record->mode == qrcodegen_Mode_KANJI) {
+            if ((record->data_len & 1u) != 0) {
+                return err_BadParameter;
+            }
+            if (record->char_count == 0) {
+                record->char_count = record->data_len / 2u;
+            }
+        } else if (record->char_count == 0) {
+            record->char_count = record->value;
+        }
+        if (record->data == NULL && record->data_len != 0) {
+            return err_BadParameter;
+        }
+    }
+
+    if (record->mode != qrcodegen_Mode_NUMERIC &&
+        record->mode != qrcodegen_Mode_ALPHANUMERIC &&
+        record->mode != qrcodegen_Mode_BYTE &&
+        record->mode != qrcodegen_Mode_ECI &&
+        record->mode != qrcodegen_Mode_KANJI) {
+        return err_BadParameter;
+    }
+
+    return NULL;
+}
+
+
+static unsigned int stored_segment_size(const segment_record *record)
+{
+    return MQ_SEGMENT_RECORD_SIZE + align4(record->data_len);
+}
+
+
+static void write_segment_record(unsigned char *out, const segment_record *record)
+{
+    put_word(out, 0, record->mode);
+    put_word(out, 4, record->value);
+    put_word(out, 8, record->char_count);
+    put_word(out, 12, record->data_len);
+    if (record->data_len != 0) {
+        memcpy(out + MQ_SEGMENT_RECORD_SIZE, record->data, record->data_len);
+        memset(out + MQ_SEGMENT_RECORD_SIZE + record->data_len, 0,
+               align4(record->data_len) - record->data_len);
+    }
+}
+
+
+static _kernel_oserror *copy_new_segments(unsigned char *out,
+                                          const void *segments,
+                                          unsigned int count,
+                                          unsigned int *bytes)
+{
+    unsigned int i;
+    unsigned int offset;
+    segment_record record;
+    _kernel_oserror *err;
+
+    offset = 0;
+    for (i = 0; i < count; i++) {
+        err = read_segment_descriptor(segments, i, &record);
+        if (err != NULL) {
+            return err;
+        }
+        write_segment_record(out + offset, &record);
+        offset += stored_segment_size(&record);
+    }
+    *bytes = offset;
+    return NULL;
+}
+
+
+static _kernel_oserror *measure_new_segments(const void *segments,
+                                             unsigned int count,
+                                             unsigned int *bytes)
+{
+    unsigned int i;
+    unsigned int total;
+    segment_record record;
+    _kernel_oserror *err;
+
+    total = 0;
+    for (i = 0; i < count; i++) {
+        err = read_segment_descriptor(segments, i, &record);
+        if (err != NULL) {
+            return err;
+        }
+        total += stored_segment_size(&record);
+    }
+    *bytes = total;
+    return NULL;
+}
+
+
+static _kernel_oserror *make_qrcode_segments(const void *workspace,
+                                             unsigned char *qrcode)
+{
+    encode_control control;
+    struct qrcodegen_Segment *segs;
+    unsigned char **buffers;
+    unsigned char **text_buffers;
+    unsigned char *temp;
+    const unsigned char *p;
+    const unsigned char *end;
+    unsigned int count;
+    unsigned int i;
+    unsigned int mode;
+    unsigned int value;
+    unsigned int char_count;
+    unsigned int data_len;
+    size_t buf_size;
+    int ok;
+    _kernel_oserror *err;
+
+    if (!valid_workspace(workspace) || get_word(workspace, 8) != MQ_KIND_SEGMENTS) {
+        return err_BadWorkspaceBlock;
+    }
+
+    count = get_word(workspace, 36);
+    control.ecc = get_word(workspace, 12);
+    control.min_version = get_word(workspace, 16);
+    control.max_version = get_word(workspace, 20);
+    control.mask = (int)get_word(workspace, 24);
+    control.flags = get_word(workspace, 28);
+
+    segs = NULL;
+    buffers = NULL;
+    text_buffers = NULL;
+    temp = NULL;
+    if (count != 0) {
+        segs = malloc(sizeof(struct qrcodegen_Segment) * count);
+        buffers = malloc(sizeof(unsigned char *) * count);
+        text_buffers = malloc(sizeof(unsigned char *) * count);
+    }
+    temp = malloc(qrcodegen_BUFFER_LEN_FOR_VERSION(control.max_version));
+    if ((count != 0 && (segs == NULL || buffers == NULL ||
+                        text_buffers == NULL)) || temp == NULL) {
+        free(segs);
+        free(buffers);
+        free(text_buffers);
+        free(temp);
+        return err_NoMemory;
+    }
+
+    for (i = 0; i < count; i++) {
+        buffers[i] = NULL;
+        text_buffers[i] = NULL;
+    }
+
+    p = (const unsigned char *)workspace + MQ_HEADER_SIZE;
+    end = (const unsigned char *)workspace + get_word(workspace, 0);
+    err = NULL;
+    for (i = 0; i < count && err == NULL; i++) {
+        if (p + MQ_SEGMENT_RECORD_SIZE > end) {
+            err = err_BadWorkspaceBlock;
+            break;
+        }
+        mode = get_word(p, 0);
+        value = get_word(p, 4);
+        char_count = get_word(p, 8);
+        data_len = get_word(p, 12);
+        p += MQ_SEGMENT_RECORD_SIZE;
+        if (p + align4(data_len) > end) {
+            err = err_BadWorkspaceBlock;
+            break;
+        }
+
+        buf_size = qrcodegen_calcSegmentBufferSize((enum qrcodegen_Mode)mode,
+                                                   char_count);
+        if (buf_size == SIZE_MAX) {
+            err = err_DataTooLong;
+            break;
+        }
+        buffers[i] = malloc(buf_size + 1);
+        if (buffers[i] == NULL) {
+            err = err_NoMemory;
+            break;
+        }
+
+        if (mode == qrcodegen_Mode_NUMERIC) {
+            text_buffers[i] = malloc(data_len + 1);
+            if (text_buffers[i] == NULL) {
+                err = err_NoMemory;
+                break;
+            }
+            memcpy(text_buffers[i], p, data_len);
+            text_buffers[i][data_len] = 0;
+            if (!qrcodegen_isNumeric((const char *)text_buffers[i])) {
+                err = err_BadParameter;
+                break;
+            }
+            segs[i] = qrcodegen_makeNumeric((const char *)text_buffers[i], buffers[i]);
+        } else if (mode == qrcodegen_Mode_ALPHANUMERIC) {
+            text_buffers[i] = malloc(data_len + 1);
+            if (text_buffers[i] == NULL) {
+                err = err_NoMemory;
+                break;
+            }
+            memcpy(text_buffers[i], p, data_len);
+            text_buffers[i][data_len] = 0;
+            if (!qrcodegen_isAlphanumeric((const char *)text_buffers[i])) {
+                err = err_BadParameter;
+                break;
+            }
+            segs[i] = qrcodegen_makeAlphanumeric((const char *)text_buffers[i], buffers[i]);
+        } else if (mode == qrcodegen_Mode_BYTE) {
+            segs[i] = qrcodegen_makeBytes(p, data_len, buffers[i]);
+        } else if (mode == qrcodegen_Mode_ECI) {
+            segs[i] = qrcodegen_makeEci((long)value, buffers[i]);
+        } else if (mode == qrcodegen_Mode_KANJI) {
+            if (!make_kanji_segment(p, data_len, buffers[i], &segs[i])) {
+                err = err_BadParameter;
+                break;
+            }
+        } else {
+            err = err_BadParameter;
+            break;
+        }
+
+        p += align4(data_len);
+    }
+
+    if (err == NULL) {
+        ok = qrcodegen_encodeSegmentsAdvanced(segs, count,
+                                              (enum qrcodegen_Ecc)control.ecc,
+                                              (int)control.min_version,
+                                              (int)control.max_version,
+                                              (enum qrcodegen_Mask)control.mask,
+                                              (control.flags & MAKEQRCODE_CONTROL_BOOST_ECC) != 0,
+                                              temp, qrcode);
+        if (!ok) {
+            err = err_DataTooLong;
+        }
+    }
+
+    for (i = 0; i < count; i++) {
+        free(buffers[i]);
+        free(text_buffers[i]);
+    }
+    free(segs);
+    free(buffers);
+    free(text_buffers);
+    free(temp);
+    return err;
+}
+
+
+static _kernel_oserror *workspace_qrcode(const void *workspace,
+                                         unsigned char *qrcode)
+{
+    unsigned int kind;
+    unsigned int qr_len;
+
+    if (!valid_workspace(workspace)) {
+        return err_BadWorkspaceBlock;
+    }
+
+    kind = get_word(workspace, 8);
+    if (kind == MQ_KIND_QR) {
+        qr_len = get_word(workspace, 32);
+        memcpy(qrcode, (const unsigned char *)workspace + MQ_HEADER_SIZE, qr_len);
+        return NULL;
+    }
+    return make_qrcode_segments(workspace, qrcode);
+}
+
+
+_kernel_oserror *makeqrcode_render(unsigned int flags,
+                                   const void *workspace,
+                                   const void *controls,
+                                   void *output,
+                                   unsigned int *output_len,
+                                   unsigned int *width,
+                                   unsigned int *height)
+{
+    render_control control;
+    unsigned char qrcode[qrcodegen_BUFFER_LEN_MAX];
+    unsigned int supplied;
+    unsigned int format;
+    _kernel_oserror *err;
+
+    format = flags & 0xfu;
+    if ((flags & 0xfffffff0u) != 0) {
+        return err_BadFlags;
+    }
+
+    supplied = *output_len;
+    read_render_control(controls, &control);
+    err = workspace_qrcode(workspace, qrcode);
+    if (err != NULL) {
+        return err;
+    }
+
+    return render_qrcode(format, qrcode, &control, output, supplied,
+                         output_len, width, height);
+}
+
+
+_kernel_oserror *makeqrcode_sprite(unsigned int flags,
+                                   const char *text,
+                                   const void *controls,
+                                   void *output,
+                                   unsigned int *output_len,
+                                   unsigned int *width,
+                                   unsigned int *height)
+{
+    encode_control enc;
+    render_control render;
+    unsigned char qrcode[qrcodegen_BUFFER_LEN_MAX];
+    unsigned int supplied;
+    unsigned int qr_len;
+    _kernel_oserror *err;
+
+    if (flags != 0) {
+        return err_BadFlags;
+    }
+
+    supplied = *output_len;
+    read_sprite_control(controls, &enc, &render);
+    if (!valid_encode_control(&enc)) {
+        return err_BadParameter;
+    }
+
+    err = encode_text_or_binary(0, text, -1, &enc, qrcode, &qr_len);
+    if (err != NULL) {
+        return err;
+    }
+
+    return render_qrcode(MAKEQRCODE_FORMAT_SPRITE_FILE, qrcode, &render,
+                         output, supplied, output_len, width, height);
+}
+
+
+static _kernel_oserror *validate_segment_workspace(void *workspace)
+{
+    unsigned char qrcode[qrcodegen_BUFFER_LEN_MAX];
+
+    return make_qrcode_segments(workspace, qrcode);
+}
+
+
+_kernel_oserror *makeqrcode_encode_segments(unsigned int flags,
+                                            const void *segments,
+                                            unsigned int count,
+                                            const void *controls,
+                                            void *output,
+                                            unsigned int *output_len)
+{
+    encode_control control;
+    unsigned int new_bytes;
+    unsigned int existing_size;
+    unsigned int existing_count;
+    unsigned int existing_payload;
+    unsigned int required;
+    unsigned int supplied;
+    unsigned char *temp;
+    _kernel_oserror *err;
+
+    if ((flags & ~MAKEQRCODE_SEGMENT_APPEND) != 0) {
+        return err_BadFlags;
+    }
+    if (segments == NULL && count != 0) {
+        return err_BadParameter;
+    }
+
+    supplied = *output_len;
+    err = measure_new_segments(segments, count, &new_bytes);
+    if (err != NULL) {
+        return err;
+    }
+
+    if ((flags & MAKEQRCODE_SEGMENT_APPEND) == 0) {
+        read_encode_control(controls, &control);
+        if (!valid_encode_control(&control)) {
+            return err_BadParameter;
+        }
+        existing_size = MQ_HEADER_SIZE;
+        existing_count = 0;
+        existing_payload = 0;
+        required = existing_size + new_bytes;
+    } else {
+        if (!valid_workspace(output) || get_word(output, 8) != MQ_KIND_SEGMENTS) {
+            return err_BadWorkspaceBlock;
+        }
+        control.ecc = get_word(output, 12);
+        control.min_version = get_word(output, 16);
+        control.max_version = get_word(output, 20);
+        control.mask = (int)get_word(output, 24);
+        control.flags = get_word(output, 28);
+        existing_size = get_word(output, 0);
+        existing_count = get_word(output, 36);
+        existing_payload = get_word(output, 40);
+        required = existing_size + new_bytes;
+    }
+
+    *output_len = required;
+    if (output == NULL || supplied == 0) {
+        temp = malloc(required);
+        if (temp == NULL) {
+            return err_NoMemory;
+        }
+        if ((flags & MAKEQRCODE_SEGMENT_APPEND) != 0) {
+            memcpy(temp, output, existing_size);
+        } else {
+            write_header(temp, MQ_HEADER_SIZE, MQ_KIND_SEGMENTS,
+                         &control, 0, 0, 0);
+        }
+        err = copy_new_segments(temp + existing_size, segments, count, &new_bytes);
+        if (err == NULL) {
+            write_header(temp, required, MQ_KIND_SEGMENTS, &control, 0,
+                         existing_count + count, existing_payload + new_bytes);
+            err = validate_segment_workspace(temp);
+        }
+        free(temp);
+        return err;
+    }
+
+    if (supplied < required) {
+        return err_BufferOverflow;
+    }
+
+    if ((flags & MAKEQRCODE_SEGMENT_APPEND) == 0) {
+        write_header(output, MQ_HEADER_SIZE, MQ_KIND_SEGMENTS,
+                     &control, 0, 0, 0);
+    }
+    err = copy_new_segments((unsigned char *)output + existing_size,
+                            segments, count, &new_bytes);
+    if (err != NULL) {
+        return err;
+    }
+    write_header(output, required, MQ_KIND_SEGMENTS, &control, 0,
+                 existing_count + count, existing_payload + new_bytes);
+    err = validate_segment_workspace(output);
+    if (err != NULL) {
+        if ((flags & MAKEQRCODE_SEGMENT_APPEND) != 0) {
+            write_header(output, existing_size, MQ_KIND_SEGMENTS, &control, 0,
+                         existing_count, existing_payload);
+        }
+        return err;
+    }
+
+    return NULL;
+}

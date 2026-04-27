@@ -1,0 +1,629 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE riscos-prm PUBLIC "-//Gerph//DTD PRM documentation 1.03//EN"
+                            "http://gerph.org/dtd/103/prm.dtd">
+
+<riscos-prm>
+<chapter title="MakeQRCode">
+
+<section title="Introduction">
+<p>
+MakeQRCode provides a relocatable module interface for creating QR codes. It is
+intended for applications and other modules that need to generate QR code images
+without invoking a command-line tool or duplicating QR code generation code.
+</p>
+
+<p>
+The module converts text, binary data, or explicitly described QR segments into
+an opaque workspace block. That block can then be rendered as a RISC OS sprite or
+as a packed bitmap. For common callers, a single simple interface encodes text
+and returns a sprite in one operation.
+</p>
+
+<p>
+The internal representation of QR codes is private to the module. Callers must
+not inspect, modify, copy in part, or persist assumptions about the contents of
+an opaque workspace block. The block may only be passed back to MakeQRCode SWIs
+that document that they accept it.
+</p>
+</section>
+
+<section title="Overview">
+<p>
+QR codes are two-dimensional barcodes made from a square grid of light and dark
+modules. A scanner reads the modules to recover a sequence of data. In common
+use that data is a text string, but it may also be arbitrary bytes or a sequence
+of structured QR segments.
+</p>
+
+<p>
+In QR terminology, a module is one square cell of the QR matrix. This is distinct
+from a RISC OS relocatable module such as MakeQRCode itself.
+</p>
+
+<p>
+QR codes do not store images or application actions directly. They store data
+which the scanning software interprets. A web address may be opened in a browser,
+a contact string may be offered as an address book entry, and a wireless network
+string may be offered as network settings, but those behaviours are conventions
+implemented by the scanner.
+</p>
+
+<p>
+For a broader introduction to QR codes, see the
+<reference type="link" href="https://www.qrcode.com/en/about/index.html" name="DENSO WAVE QR Code overview"/>.
+</p>
+
+<subsection title="QR version">
+<p>
+The QR version controls the size of the QR matrix. Version 1 is 21 by 21 modules;
+each later version adds four modules in each direction, up to version 40 at 177
+by 177 modules. Larger versions can hold more data, but produce a denser and
+larger code. Allowing the module to choose the smallest suitable version usually
+gives the best result.
+</p>
+</subsection>
+
+<subsection title="ECC level">
+<p>
+ECC is error correction coding. A higher ECC level allows the QR code to survive
+more damage, dirt, or poor scanning conditions, but leaves less room for payload
+data. The levels are:
+</p>
+<p>
+<value-table head-number="Value" head-name="Level" head-value="Meaning">
+ <value number="0" name="Low">Lowest redundancy; holds the most data.</value>
+ <value number="1" name="Medium">Moderate redundancy.</value>
+ <value number="2" name="Quartile">Higher redundancy and the default used by MakeQRCode.</value>
+ <value number="3" name="High">Highest redundancy; holds the least data.</value>
+</value-table>
+</p>
+<p>
+ECC boosting allows the encoder to raise the ECC level when doing so does not
+force a larger QR version.
+</p>
+</subsection>
+
+<subsection title="Mask pattern">
+<p>
+A mask pattern changes how the generated modules are inverted to avoid visual
+patterns that are hard for scanners to read. QR codes define eight mask patterns.
+Automatic mask selection asks the encoder to test the patterns and choose a good
+one. Fixed masks are mainly useful for testing or for callers that need
+repeatable output.
+</p>
+<p>
+<value-table head-number="Value" head-value="Meaning">
+ <value number="-1">Automatic mask selection.</value>
+ <value number="0-7">Use the specified QR mask pattern.</value>
+</value-table>
+</p>
+</subsection>
+
+<subsection title="Segments">
+<p>
+A QR payload may be split into segments. Each segment has a mode that describes
+how its data should be encoded. Numeric and alphanumeric modes are compact for
+their restricted character sets, byte mode is suitable for general data, ECI
+segments identify the character set or interpretation used by following data, and
+kanji mode is used for Shift JIS kanji data.
+</p>
+<p>
+Segment control is more complex than text or binary input, but it can reduce the
+QR version needed for structured data. It is usually only needed by callers that
+already understand the QR standard or need precise compatibility with another
+encoder.
+</p>
+</subsection>
+
+<subsection title="Common payload strings">
+<p>
+Many scanners recognise text strings with conventional prefixes. MakeQRCode does
+not interpret these strings; it encodes them exactly as supplied. Useful examples
+include:
+</p>
+<p>
+<definition-table head-name="Prefix" head-value="Common use">
+ <definition name="http:// or https://">A web address.</definition>
+ <definition name="mailto:">An email address or email message.</definition>
+ <definition name="tel:">A telephone number.</definition>
+ <definition name="sms:">A text message destination and optional body.</definition>
+ <definition name="WIFI:">Wireless network settings.</definition>
+ <definition name="BEGIN:VCARD">A vCard contact record.</definition>
+ <definition name="BEGIN:VEVENT">A calendar event.</definition>
+</definition-table>
+</p>
+</subsection>
+</section>
+
+<section title="Technical Details">
+
+<subsection title="Typical sequences">
+<p>
+Common use follows these sequences:
+</p>
+<p>
+<list type="unordered">
+ <item><p>To create a sprite with the simple interface, call <reference type="swi" name="MakeQRCode_Sprite"/> with a text string, optional sprite controls, and an output buffer.</p></item>
+ <item><p>To create a sprite with the advanced interface, call <reference type="swi" name="MakeQRCode_Encode"/> to create an opaque workspace block, then call <reference type="swi" name="MakeQRCode_Render"/> with sprite output selected.</p></item>
+ <item><p>To create a bitmap with the advanced interface, call <reference type="swi" name="MakeQRCode_Encode"/> to create an opaque workspace block, then call <reference type="swi" name="MakeQRCode_Render"/> with packed bitmap output selected.</p></item>
+ <item><p>To control QR segments directly, call <reference type="swi" name="MakeQRCode_EncodeSegments"/> to create an opaque workspace block, optionally call it again with the append flag to add more segments, then call <reference type="swi" name="MakeQRCode_Render"/> to create the required image data.</p></item>
+</list>
+</p>
+</subsection>
+
+<subsection title="Buffer handling">
+<p>
+SWIs that return variable sized data take an output buffer pointer and an output
+buffer length in registers. If the output buffer pointer is 0, or if the supplied
+length is 0, the SWI performs a size query and returns the number of bytes
+required without writing output.
+</p>
+
+<p>
+If the supplied buffer is too small, the SWI returns the
+<reference type="error" name="MakeQRCode_BufferOverflow"/> error and returns the
+number of bytes required in the output length register. If the SWI succeeds, the
+same register contains the number of bytes written.
+</p>
+
+<p>
+Buffer contents are undefined when an error is returned, except for errors
+reported by a size query, where no output bytes are written.
+</p>
+</subsection>
+
+<subsection title="Encoding controls">
+<p>
+The encoding controls block is used by SWIs that create an opaque workspace block.
+If a pointer to this block is 0, the default values are used.
+</p>
+<p>
+<offset-table head-number="Offset" head-name="Name" head-data-size="Size" head-value="Meaning">
+ <offset number="0" name="Size" data-size="word">Size of this block in bytes (24 for the full block). Fields beyond this size are treated as absent.</offset>
+ <offset number="4" name="ECC level" data-size="word">Error correction level. See the ECC level table. The default is 2.</offset>
+ <offset number="8" name="Minimum version" data-size="word">Minimum QR version, in the range 1 to 40. The default is 1.</offset>
+ <offset number="12" name="Maximum version" data-size="word">Maximum QR version, in the range 1 to 40. The default is 40.</offset>
+ <offset number="16" name="Mask" data-size="word">Mask pattern. See the mask pattern table. The default is -1.</offset>
+ <offset number="20" name="Flags" data-size="word">Encoding flags. Bit 0 set permits the module to raise the ECC level when this does not increase the QR version. The default is set. Other bits must be zero.</offset>
+</offset-table>
+</p>
+</subsection>
+
+<subsection title="Sprite controls">
+<p>
+The sprite controls block is used by <reference type="swi" name="MakeQRCode_Sprite"/>.
+It combines the encoding controls with sprite rendering controls. If a pointer to
+this block is 0, the default values are used.
+</p>
+<p>
+<offset-table head-number="Offset" head-name="Name" head-data-size="Size" head-value="Meaning">
+ <offset number="0" name="Size" data-size="word">Size of this block in bytes (48 for the full block). Fields beyond this size are treated as absent.</offset>
+ <offset number="4" name="Foreground colour" data-size="word">RISC OS palette word for dark modules. The default is &hex;00000010.</offset>
+ <offset number="8" name="Background colour" data-size="word">RISC OS palette word for light modules. The default is &hex;FFFFFF10.</offset>
+ <offset number="12" name="Border" data-size="word">Quiet-zone border in QR modules. The default is 4.</offset>
+ <offset number="16" name="Sprite name" data-size="12 bytes">Sprite name. The default is <userinput>qrcode</userinput>. The name is padded with zero bytes if shorter than 12 bytes.</offset>
+ <offset number="28" name="ECC level" data-size="word">As for the encoding controls block.</offset>
+ <offset number="32" name="Minimum version" data-size="word">As for the encoding controls block.</offset>
+ <offset number="36" name="Maximum version" data-size="word">As for the encoding controls block.</offset>
+ <offset number="40" name="Mask" data-size="word">As for the encoding controls block.</offset>
+ <offset number="44" name="Flags" data-size="word">As for the encoding controls block.</offset>
+</offset-table>
+</p>
+</subsection>
+
+<subsection title="Render controls">
+<p>
+The render controls block is used by <reference type="swi" name="MakeQRCode_Render"/>.
+If a pointer to this block is 0, the default values are used.
+</p>
+<p>
+<offset-table head-number="Offset" head-name="Name" head-data-size="Size" head-value="Meaning">
+ <offset number="0" name="Size" data-size="word">Size of this block in bytes (32 for the full block). Fields beyond this size are treated as absent.</offset>
+ <offset number="4" name="Foreground colour" data-size="word">RISC OS palette word for dark modules in sprite output. The default is &hex;00000010.</offset>
+ <offset number="8" name="Background colour" data-size="word">RISC OS palette word for light modules in sprite output. The default is &hex;FFFFFF10.</offset>
+ <offset number="12" name="Border" data-size="word">Quiet-zone border in QR modules. The default is 4.</offset>
+ <offset number="16" name="Sprite name" data-size="12 bytes">Sprite name for sprite output. The default is <userinput>qrcode</userinput>.</offset>
+ <offset number="28" name="Bitmap row alignment" data-size="word">Row alignment for packed bitmap output, in bytes. 0 means the module default. The initial default is word alignment.</offset>
+</offset-table>
+</p>
+</subsection>
+
+<subsection title="Render formats">
+<p>
+Render format values are used by <reference type="swi" name="MakeQRCode_Render"/>.
+</p>
+<p>
+<value-table head-number="Value" head-value="Format">
+ <value number="0">RISC OS sprite file containing one mode 18 sprite. The output begins with the three-word sprite area header, followed by the single sprite. The sprite area offsets use the usual RISC OS stored offset values, so they are four bytes greater than the byte position in the returned file.</value>
+ <value number="1">Single RISC OS mode 18 sprite, with a two-entry palette and no mask. The sprite area file header is not included.</value>
+ <value number="2">Packed 1bpp bitmap, one bit per QR module including the requested border. Bit 0 of each byte is the leftmost pixel of that group of eight pixels.</value>
+</value-table>
+</p>
+</subsection>
+
+<subsection title="Segment descriptors">
+<p>
+The segment interface is provided for callers that need explicit control over the
+QR mode used for each part of the payload. The segment descriptor array is read
+only during the call. Segment data is copied into the opaque workspace block, so
+no pointers from the descriptors are retained.
+</p>
+<p>
+<offset-table head-number="Offset" head-name="Name" head-data-size="Size" head-value="Meaning">
+ <offset number="0" name="Size" data-size="word">Size of this descriptor in bytes (24 for the full descriptor).</offset>
+ <offset number="4" name="Mode" data-size="word"><p>Segment mode:</p>
+  <p>
+  <value-table head-number="Value" head-name="Mode" head-value="Meaning">
+   <value number="1" name="Numeric">Decimal digits only.</value>
+   <value number="2" name="Alphanumeric">Upper-case alphanumeric data and the limited QR punctuation set.</value>
+   <value number="4" name="Byte">Binary byte data.</value>
+   <value number="7" name="ECI">Extended Channel Interpretation assignment value.</value>
+   <value number="8" name="Kanji">Shift JIS kanji data.</value>
+  </value-table>
+  </p>
+ </offset>
+ <offset number="8" name="Data pointer" data-size="word">Pointer to the segment data. This is ignored for ECI segments.</offset>
+ <offset number="12" name="Data length" data-size="word">Length of the source data in bytes, except for ECI segments where this is the ECI assignment value.</offset>
+ <offset number="16" name="Character count" data-size="word">Number of characters represented by the segment, or 0 to allow the module to derive this for modes where the byte length is sufficient.</offset>
+ <offset number="20" name="Flags" data-size="word">Segment flags. Reserved bits must be zero.</offset>
+</offset-table>
+</p>
+</subsection>
+
+<subsection title="Opaque workspace blocks">
+<p>
+Opaque workspace blocks contain their own size in their first word. The remainder
+of the block is private to MakeQRCode. A block is valid only if it was returned
+by MakeQRCode and is passed back whole. The contents and layout may change
+between module versions.
+</p>
+</subsection>
+
+</section>
+
+<section title="SWI Calls">
+
+<swi-definition name="MakeQRCode_Sprite"
+                number="C83C0"
+                description="Encodes text and returns a RISC OS sprite"
+                irqs="enabled"
+                fiqs="enabled"
+                processor-mode="SVC"
+                re-entrant="no">
+<entry>
+ <register-use number="0">Flags. Reserved bits must be zero.</register-use>
+ <register-use number="1">Pointer to a zero-terminated UTF-8 text string.</register-use>
+ <register-use number="2">Pointer to a sprite controls block, or 0 for defaults.</register-use>
+ <register-use number="3">Pointer to the output buffer, or 0 to query the required size.</register-use>
+ <register-use number="4">Length of the output buffer in bytes, or 0 to query the required size.</register-use>
+</entry>
+<exit>
+ <register-use number="1">Output width in pixels, including the requested border.</register-use>
+ <register-use number="2">Output height in pixels, including the requested border.</register-use>
+ <register-use number="3" state="preserved"/>
+ <register-use number="4">Number of bytes written, or number of bytes required if this is a size query or if <reference type="error" name="MakeQRCode_BufferOverflow"/> is returned.</register-use>
+</exit>
+<use>
+<p>
+This SWI is the simple interface for callers that want a QR code sprite from a
+text string. It encodes the text and renders a sprite in one call. By default it
+uses ECC quartile, versions 1 to 40, automatic mask choice, ECC boosting, a
+border of 4 modules, black foreground, white background, and the sprite name
+<userinput>qrcode</userinput>.
+The output is a RISC OS sprite file containing one sprite.
+</p>
+</use>
+<related>
+ <reference type="swi" name="MakeQRCode_Encode"/>
+ <reference type="swi" name="MakeQRCode_Render"/>
+</related>
+</swi-definition>
+
+<swi-definition name="MakeQRCode_Encode"
+                number="C83C1"
+                description="Encodes text or binary data into an opaque workspace block"
+                irqs="enabled"
+                fiqs="enabled"
+                processor-mode="SVC"
+                re-entrant="no">
+<entry>
+ <register-use number="0">
+  Flags:
+  <bitfield-table>
+   <bit number="0" name="Input type">0 = UTF-8 text, 1 = binary byte data.</bit>
+   <bit number="1-31" state="reserved">Reserved. Must be zero.</bit>
+  </bitfield-table>
+ </register-use>
+ <register-use number="1">Pointer to the input data.</register-use>
+ <register-use number="2">Length of the input data in bytes. For text input, -1 means that R1 points to a zero-terminated string.</register-use>
+ <register-use number="3">Pointer to an encoding controls block, or 0 for defaults.</register-use>
+ <register-use number="4">Pointer to the output buffer for the opaque workspace block, or 0 to query the required size.</register-use>
+ <register-use number="5">Length of the output buffer in bytes, or 0 to query the required size.</register-use>
+</entry>
+<exit>
+ <register-use number="4" state="preserved"/>
+ <register-use number="5">Number of bytes written, or number of bytes required if this is a size query or if <reference type="error" name="MakeQRCode_BufferOverflow"/> is returned.</register-use>
+</exit>
+<use>
+<p>
+This SWI encodes UTF-8 text or binary byte data into an opaque workspace block. The
+result is not directly renderable by the caller; pass the block to
+<reference type="swi" name="MakeQRCode_Render"/> to produce image data. The
+workspace block contains its own size.
+</p>
+</use>
+<related>
+ <reference type="swi" name="MakeQRCode_Render"/>
+ <reference type="swi" name="MakeQRCode_EncodeSegments"/>
+</related>
+</swi-definition>
+
+<swi-definition name="MakeQRCode_Render"
+                number="C83C2"
+                description="Renders an opaque workspace block as image data"
+                irqs="enabled"
+                fiqs="enabled"
+                processor-mode="SVC"
+                re-entrant="no">
+<entry>
+ <register-use number="0">
+  Flags:
+  <bitfield-table>
+   <bit number="0-3" name="Render format">Render format. 0 = RISC OS sprite file, 1 = single RISC OS sprite, 2 = packed 1bpp bitmap.</bit>
+   <bit number="4-31" state="reserved">Reserved. Must be zero.</bit>
+  </bitfield-table>
+ </register-use>
+ <register-use number="1">Pointer to an opaque workspace block returned by MakeQRCode.</register-use>
+ <register-use number="2">Pointer to a render controls block, or 0 for defaults.</register-use>
+ <register-use number="3">Pointer to the output buffer, or 0 to query the required size.</register-use>
+ <register-use number="4">Length of the output buffer in bytes, or 0 to query the required size.</register-use>
+</entry>
+<exit>
+ <register-use number="1">Output width in pixels, including the requested border.</register-use>
+ <register-use number="2">Output height in pixels, including the requested border.</register-use>
+ <register-use number="3" state="preserved"/>
+ <register-use number="4">Number of bytes written, or number of bytes required if this is a size query or if <reference type="error" name="MakeQRCode_BufferOverflow"/> is returned.</register-use>
+</exit>
+<use>
+<p>
+This SWI renders an opaque workspace block produced by
+<reference type="swi" name="MakeQRCode_Encode"/> or
+<reference type="swi" name="MakeQRCode_EncodeSegments"/>. Sprite file and single
+sprite output use RISC OS mode 18 and include a two-entry palette. Packed bitmap
+output is intended for callers that want to place the image into their own
+bitmap or sprite format.
+</p>
+</use>
+<related>
+ <reference type="swi" name="MakeQRCode_Encode"/>
+ <reference type="swi" name="MakeQRCode_EncodeSegments"/>
+</related>
+</swi-definition>
+
+<swi-definition name="MakeQRCode_EncodeSegments"
+                number="C83C3"
+                description="Encodes explicit QR segments into an opaque workspace block"
+                irqs="enabled"
+                fiqs="enabled"
+                processor-mode="SVC"
+                re-entrant="no">
+<entry>
+ <register-use number="0">
+  Flags:
+  <bitfield-table>
+   <bit number="0" name="Append">Append these segments to the opaque workspace block in R4.</bit>
+   <bit number="1-31" state="reserved">Reserved. Must be zero.</bit>
+  </bitfield-table>
+ </register-use>
+ <register-use number="1">Pointer to an array of segment descriptors.</register-use>
+ <register-use number="2">Number of segment descriptors in the array.</register-use>
+ <register-use number="3">Pointer to an encoding controls block, or 0 for defaults. This is ignored when R0 bit 0 is set.</register-use>
+ <register-use number="4">Pointer to the output buffer for the opaque workspace block, or 0 to query the required size. When R0 bit 0 is set, this must point to an existing opaque workspace block.</register-use>
+ <register-use number="5">Length of the output buffer in bytes, or 0 to query the required size. When R0 bit 0 is set, this is the total available length of the buffer containing the existing workspace block.</register-use>
+</entry>
+<exit>
+ <register-use number="4" state="preserved"/>
+ <register-use number="5">Number of bytes written, or number of bytes required if this is a size query or if <reference type="error" name="MakeQRCode_BufferOverflow"/> is returned.</register-use>
+</exit>
+<use>
+<p>
+This SWI is the low-level encoding interface for callers that need to control
+the QR mode of each payload segment. It returns the same opaque workspace block format
+as <reference type="swi" name="MakeQRCode_Encode"/>.
+</p>
+<p>
+If R0 bit 0 is clear, this SWI starts a new opaque workspace block and uses the
+encoding controls in R3. If R0 bit 0 is set, R4 must point to an existing opaque
+workspace block previously returned by MakeQRCode. The supplied segment
+descriptors are appended to that block, and the original encoding controls in
+the block continue to apply.
+</p>
+<p>
+Appending may be used to build a QR payload incrementally. For an append size
+query, R4 still points to the existing opaque workspace block and R5 is 0. If
+there is not enough space to append the supplied segments, the
+<reference type="error" name="MakeQRCode_BufferOverflow"/> error is returned,
+R5 contains the required total size, and the existing workspace block remains
+valid and unchanged.
+</p>
+</use>
+<related>
+ <reference type="swi" name="MakeQRCode_Encode"/>
+ <reference type="swi" name="MakeQRCode_Render"/>
+</related>
+</swi-definition>
+
+<swi-definition name="MakeQRCode_Info"
+                number="C83C4"
+                description="Returns information about the MakeQRCode interface"
+                irqs="enabled"
+                fiqs="enabled"
+                processor-mode="SVC"
+                re-entrant="yes">
+<entry>
+ <register-use number="0">Flags. Reserved bits must be zero.</register-use>
+</entry>
+<exit>
+ <register-use number="0">Interface version. The initial version is 0.</register-use>
+ <register-use number="1">Maximum supported QR version. The initial value is 40.</register-use>
+ <register-use number="2">Maximum QR matrix side length in modules. The initial value is 177.</register-use>
+ <register-use number="3">
+  Supported render formats:
+  <bitfield-table>
+   <bit number="0" name="Sprite file">RISC OS sprite file output is supported.</bit>
+   <bit number="1" name="Single sprite">Single RISC OS sprite output is supported.</bit>
+   <bit number="2" name="Bitmap">Packed 1bpp bitmap output is supported.</bit>
+   <bit number="3-31" state="reserved">Reserved.</bit>
+  </bitfield-table>
+ </register-use>
+ <register-use number="4">Maximum opaque workspace block size in bytes required by this implementation.</register-use>
+</exit>
+<use>
+<p>
+This SWI allows callers to discover the limits and supported formats of the
+loaded MakeQRCode module.
+</p>
+</use>
+</swi-definition>
+
+</section>
+
+<section title="Commands">
+
+<command-definition name="MakeQRCode"
+                    description="Creates a QR code sprite file">
+<syntax>
+ <userreplace>text</userreplace> <userreplace>filename</userreplace>
+</syntax>
+<parameter name="text">
+The text to encode into the QR code. Use quotes if the text contains spaces.
+</parameter>
+<parameter name="filename">
+The sprite file to create.
+</parameter>
+<use>
+<p>
+The command creates a RISC OS sprite file containing one QR code sprite. It uses
+the simple interface defaults: ECC quartile, automatic mask choice, ECC
+boosting, a border of 4 modules, black foreground, white background, and the
+sprite name <userinput>qrcode</userinput>.
+</p>
+</use>
+<example>
+<command>*MakeQRCode "Hello world" "HelloQR"</command>
+</example>
+<related>
+ <reference type="swi" name="MakeQRCode_Sprite"/>
+</related>
+</command-definition>
+
+</section>
+
+<section title="Error Messages">
+
+<error-definition name="MakeQRCode_BufferOverflow"
+                  number="1E4"
+                  description="Buffer overflow">
+<use>
+<p>
+The supplied output buffer was too small. The output length register contains
+the number of bytes required.
+</p>
+</use>
+</error-definition>
+
+<error-definition name="MakeQRCode_BadFlags"
+                  number="9E9701"
+                  description="Bad flags">
+<use>
+<p>
+Reserved flag bits were set in R0 or in a parameter block.
+</p>
+</use>
+</error-definition>
+
+<error-definition name="MakeQRCode_BadParameter"
+                  number="9E9702"
+                  description="Bad parameter">
+<use>
+<p>
+A supplied pointer, length, version, mask, ECC level, colour, sprite name, or
+other parameter was invalid.
+</p>
+</use>
+</error-definition>
+
+<error-definition name="MakeQRCode_DataTooLong"
+                  number="9E9703"
+                  description="Data too long">
+<use>
+<p>
+The input data cannot be encoded within the requested QR version range and ECC
+level.
+</p>
+</use>
+</error-definition>
+
+<error-definition name="MakeQRCode_BadWorkspaceBlock"
+                  number="9E9704"
+                  description="Bad workspace block">
+<use>
+<p>
+The opaque workspace block supplied to
+<reference type="swi" name="MakeQRCode_Render"/> was not recognised or was not
+complete.
+</p>
+</use>
+</error-definition>
+
+<error-definition name="MakeQRCode_NoMemory"
+                  number="9E9705"
+                  description="Not enough memory">
+<use>
+<p>
+The module could not allocate temporary workspace required to complete the
+operation.
+</p>
+</use>
+</error-definition>
+
+</section>
+
+<section title="Examples">
+<p>
+<extended-example type="basic">
+REM Query the size required for a default sprite
+<br/>
+SYS "XMakeQRCode_Sprite", 0, text%, 0, 0, 0 TO ,,,,needed%; flags%
+<br/>
+IF flags% AND 1 THEN ERROR 0, "Size query failed"
+<br/>
+DIM sprite% needed%-1
+<br/>
+SYS "MakeQRCode_Sprite", 0, text%, 0, sprite%, needed% TO ,,,,used%
+</extended-example>
+</p>
+</section>
+
+</chapter>
+
+<meta>
+<maintainer>
+ <email name="Gerph" address="gerph@gerph.org"/>
+</maintainer>
+<disclaimer>
+ <p>Copyright (c) 2026 Gerph. This documentation is released under the MIT license.</p>
+</disclaimer>
+<history>
+ <revision number="1" date="27 April 2026" author="Gerph" title="Initial version">
+  <change>Created the MakeQRCode module interface documentation.</change>
+ </revision>
+</history>
+<related>
+ <reference type="link" href="https://www.iso.org/standard/83389.html" name="ISO/IEC 18004:2024"/>
+ <reference type="link" href="https://www.qrcode.com/en/about/index.html" name="DENSO WAVE QR Code overview"/>
+ <reference type="link" href="https://github.com/gerph/QR-Code-generator.git" name="MakeQRCode source repository"/>
+</related>
+</meta>
+
+</riscos-prm>

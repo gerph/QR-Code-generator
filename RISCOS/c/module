@@ -1,0 +1,322 @@
+/*******************************************************************
+ * File:        module
+ * Purpose:     MakeQRCode module SWI interface
+ * Author:      Gerph
+ ******************************************************************/
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "kernel.h"
+#include "swis.h"
+#include "modhead.h"
+#include "makeqrcode.h"
+
+/* #define DEBUG */
+
+#ifdef DEBUG
+#include <stdio.h>
+#define dprintf if (1) printf
+#else
+#define dprintf (void)
+#endif
+
+
+/***************************************************************************
+ * Function:     Mod_Init
+ * Description:  Initialise the module.
+ * Parameters:   tail        = pointer to command line
+ *               podule_base = address of podule module was started from
+ *               pw          = private word for module
+ * On exit:      Return NULL for successful initialisation.
+ **************************************************************************/
+_kernel_oserror *Mod_Init(const char *tail, int podule_base, void *pw)
+{
+    dprintf("Module MakeQRCode initialised\n");
+    return NULL;
+}
+
+
+/***************************************************************************
+ * Function:     Mod_Final
+ * Description:  Finalise the module.
+ * Parameters:   fatal       = fatality indicator
+ *               podule_base = address of podule module was started from
+ *               pw          = private word for module
+ * On exit:      Return NULL for successful finalisation.
+ **************************************************************************/
+_kernel_oserror *Mod_Final(int fatal, int podule_base, void *pw)
+{
+    dprintf("Module MakeQRCode dying\n");
+    return NULL;
+}
+
+
+_kernel_oserror *SWI_Sprite(int swi, _kernel_swi_regs *r, void *pw)
+{
+    unsigned int out_len;
+    unsigned int width;
+    unsigned int height;
+    _kernel_oserror *err;
+
+    out_len = (unsigned int)r->r[4];
+    width = 0;
+    height = 0;
+
+    err = makeqrcode_sprite((unsigned int)r->r[0],
+                            (const char *)r->r[1],
+                            (const void *)r->r[2],
+                            (void *)r->r[3],
+                            &out_len,
+                            &width,
+                            &height);
+    r->r[1] = (int)width;
+    r->r[2] = (int)height;
+    r->r[4] = (int)out_len;
+    return err;
+}
+
+
+_kernel_oserror *SWI_Encode(int swi, _kernel_swi_regs *r, void *pw)
+{
+    unsigned int out_len;
+    _kernel_oserror *err;
+
+    out_len = (unsigned int)r->r[5];
+    err = makeqrcode_encode((unsigned int)r->r[0],
+                            (const void *)r->r[1],
+                            r->r[2],
+                            (const void *)r->r[3],
+                            (void *)r->r[4],
+                            &out_len);
+    r->r[5] = (int)out_len;
+    return err;
+}
+
+
+_kernel_oserror *SWI_Render(int swi, _kernel_swi_regs *r, void *pw)
+{
+    unsigned int out_len;
+    unsigned int width;
+    unsigned int height;
+    _kernel_oserror *err;
+
+    out_len = (unsigned int)r->r[4];
+    width = 0;
+    height = 0;
+
+    err = makeqrcode_render((unsigned int)r->r[0],
+                            (const void *)r->r[1],
+                            (const void *)r->r[2],
+                            (void *)r->r[3],
+                            &out_len,
+                            &width,
+                            &height);
+    r->r[1] = (int)width;
+    r->r[2] = (int)height;
+    r->r[4] = (int)out_len;
+    return err;
+}
+
+
+_kernel_oserror *SWI_EncodeSegments(int swi, _kernel_swi_regs *r, void *pw)
+{
+    unsigned int out_len;
+    _kernel_oserror *err;
+
+    out_len = (unsigned int)r->r[5];
+    err = makeqrcode_encode_segments((unsigned int)r->r[0],
+                                     (const void *)r->r[1],
+                                     (unsigned int)r->r[2],
+                                     (const void *)r->r[3],
+                                     (void *)r->r[4],
+                                     &out_len);
+    r->r[5] = (int)out_len;
+    return err;
+}
+
+
+_kernel_oserror *SWI_Info(int swi, _kernel_swi_regs *r, void *pw)
+{
+    if (r->r[0] != 0) {
+        return err_BadFlags;
+    }
+
+    r->r[0] = 0;
+    r->r[1] = 40;
+    r->r[2] = 177;
+    r->r[3] = (1 << MAKEQRCODE_FORMAT_SPRITE_FILE) |
+              (1 << MAKEQRCODE_FORMAT_SPRITE) |
+              (1 << MAKEQRCODE_FORMAT_BITMAP);
+    r->r[4] = 64 + 3918;
+    return NULL;
+}
+
+
+static int command_end(int ch)
+{
+    return ((unsigned int)ch & 0xffu) < ' ';
+}
+
+
+static const char *skip_spaces(const char *p)
+{
+    while (*p == ' ') {
+        p++;
+    }
+    return p;
+}
+
+
+static _kernel_oserror *read_arg(const char **tail, char **out)
+{
+    const char *p;
+    const char *start;
+    char *copy;
+    unsigned int len;
+    unsigned int i;
+
+    p = skip_spaces(*tail);
+    if (command_end(*p)) {
+        return err_BadParameter;
+    }
+
+    len = 0;
+    if (*p == '"') {
+        p++;
+        start = p;
+        while (!command_end(*p) && *p != '"') {
+            p++;
+            len++;
+        }
+        if (*p != '"') {
+            return err_BadParameter;
+        }
+        copy = malloc(len + 1);
+        if (copy == NULL) {
+            return err_NoMemory;
+        }
+        for (i = 0; i < len; i++) {
+            copy[i] = start[i];
+        }
+        copy[len] = '\0';
+        p++;
+    } else {
+        start = p;
+        while (!command_end(*p) && *p != ' ' && *p != '\t') {
+            p++;
+            len++;
+        }
+        copy = malloc(len + 1);
+        if (copy == NULL) {
+            return err_NoMemory;
+        }
+        memcpy(copy, start, len);
+        copy[len] = '\0';
+    }
+
+    *tail = p;
+    *out = copy;
+    return NULL;
+}
+
+
+static _kernel_oserror *read_command_args(const char *arg_string,
+                                          char **text,
+                                          char **filename)
+{
+    const char *p;
+    _kernel_oserror *err;
+
+    p = arg_string;
+    *text = NULL;
+    *filename = NULL;
+
+    err = read_arg(&p, text);
+    if (err != NULL) {
+        return err;
+    }
+
+    err = read_arg(&p, filename);
+    if (err != NULL) {
+        free(*text);
+        *text = NULL;
+        return err;
+    }
+
+    p = skip_spaces(p);
+    if (!command_end(*p)) {
+        free(*text);
+        free(*filename);
+        *text = NULL;
+        *filename = NULL;
+        return err_BadParameter;
+    }
+
+    return NULL;
+}
+
+
+static _kernel_oserror *save_sprite_file(const char *filename,
+                                         void *buffer,
+                                         unsigned int length)
+{
+    _kernel_oserror *err;
+
+    err = _swix(OS_File, _INR(0, 5), 0, filename, 0, 0,
+                buffer, (char *)buffer + length);
+    if (err != NULL) {
+        return err;
+    }
+
+    return _swix(OS_File, _INR(0, 2), 18, filename, 0xff9);
+}
+
+
+static _kernel_oserror *command_makeqrcode(const char *arg_string)
+{
+    char *text;
+    char *filename;
+    void *buffer;
+    unsigned int length;
+    unsigned int width;
+    unsigned int height;
+    _kernel_oserror *err;
+
+    err = read_command_args(arg_string, &text, &filename);
+    if (err != NULL) {
+        return err;
+    }
+
+    buffer = NULL;
+    length = 0;
+    err = makeqrcode_sprite(0, text, NULL, NULL, &length, &width, &height);
+    if (err == NULL) {
+        buffer = malloc(length);
+        if (buffer == NULL) {
+            err = err_NoMemory;
+        }
+    }
+    if (err == NULL) {
+        err = makeqrcode_sprite(0, text, NULL, buffer, &length, &width, &height);
+    }
+    if (err == NULL) {
+        err = save_sprite_file(filename, buffer, length);
+    }
+
+    free(buffer);
+    free(text);
+    free(filename);
+    return err;
+}
+
+
+_kernel_oserror *Mod_Command(const char *arg_string, int argc, int number,
+                             void *pw)
+{
+    if (number == CMD_MakeQRCode) {
+        return command_makeqrcode(arg_string);
+    }
+
+    return NULL;
+}

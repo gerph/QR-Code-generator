@@ -32,10 +32,14 @@ on:
     types: [opened, reopened, synchronize]
     branches: ["*"]
 
+env:
+  COMPONENT_NAME: "MakeQRCode"
+
 jobs:
   build-riscos:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     concurrency:
       group: riscos-build-server
     outputs:
@@ -47,17 +51,31 @@ jobs:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v6
 
+      - name: Get documentation tool
+        run: |
+          wget -O prminxml.tar.gz https://github.com/gerph/riscos-prminxml-tool/releases/download/v1.03.343/POSIX-PRMinXML-1.03.343.tar.gz
+          tar zxvf prminxml.tar.gz
+          ls
+
+      - name: Generate PRM-in-XML documentation
+        run: |
+          cd RISCOS
+          mkdir docs
+          sudo apt-get install -y xsltproc
+          ../riscos-prminxml -f html5+xml -O docs prminxml/MakeQRCode.xml
+
       - name: Obtain prerequisite build tool
         run: |
           # Fetch the build client
-          curl -s -L -o riscos-build-online https://github.com/gerph/robuild-client/releases/download/v0.05/riscos-build-online && chmod +x riscos-build-online
+          curl -s -L -o riscos-build-online https://github.com/gerph/robuild-client/releases/download/v0.07/riscos-build-online && chmod +x riscos-build-online
 
       - name: Build through build.riscos.online
         run: |
           set -o pipefail
           cd RISCOS
           # Zip up the source to send to robuild
-          zip -q9r /tmp/source-archive.zip c h Makefile* VersionNum .robuild.yaml
+          cp ../LICENSE .
+          zip -q9r /tmp/source-archive.zip * .robuild.yaml
 
           # Send the archive file to build service
           ../riscos-build-online -i /tmp/source-archive.zip -a off -t 600 -o /tmp/built
@@ -66,15 +84,15 @@ jobs:
         id: version
         run: |
           cd RISCOS
-          if [[ -f VersionNum ]] ; then
+          if [ -f VersionNum ] ; then
               version=$(sed '/MajorVersion / ! d ; s/.*MajorVersion *"\(.*\)"/\1/' VersionNum)
           else
               version=$(git rev-parse --short HEAD)
           fi
           echo "This is version: $version"
-          leafname="QRCodeGen-$version.zip"
+          leafname="$COMPONENT_NAME-$version.zip"
           if [ -f /tmp/built,a91 ] ; then
-              cp /tmp/built,a91 "../QRCodeGen-$version.zip"
+              cp /tmp/built,a91 "../$leafname"
           else
               echo "No archive was built?"
               exit 1

@@ -1,0 +1,96 @@
+REM >test-module
+REM Smoke tests for the MakeQRCode module
+ON ERROR ERROR EXT ERR, REPORT$ + " at line " + STR$(ERL/10)
+
+DIM text% 32
+$text% = "Hello world" + CHR$0
+
+PROCcall_sprite
+PROCcall_advanced
+PROCcall_segments
+PROCcall_command
+
+PRINT "MakeQRCode module smoke tests passed"
+END
+
+DEFPROCcall_sprite
+LOCAL err%, flags%, width%, height%, needed%, used%, sprite%
+SYS "XMakeQRCode_Sprite", 0, text%, 0, 0, 0 TO err%, width%, height%,, needed%; flags%
+IF flags% AND 1 THEN ERROR err%!0, FNstring0(err%+4)
+IF needed% <= 0 THEN ERROR 1, "Sprite size query returned no size"
+IF width% <= 0 OR height% <> width% THEN ERROR 1, "Bad sprite dimensions"
+DIM sprite% needed%-1
+SYS "XMakeQRCode_Sprite", 0, text%, 0, sprite%, needed% TO err%, width%, height%,, used%; flags%
+IF flags% AND 1 THEN ERROR err%!0, FNstring0(err%+4)
+IF used% <> needed% THEN ERROR 1, "Sprite output length changed"
+IF !sprite% <> 1 THEN ERROR 1, "Sprite file header was not returned"
+IF sprite%!4 <> &10 THEN ERROR 1, "Sprite file first offset is wrong"
+IF sprite%!8 <> needed% + 4 THEN ERROR 1, "Sprite file free offset is wrong"
+IF sprite%!12 <> needed% - 12 THEN ERROR 1, "Sprite header has wrong next offset"
+IF FNstring0(sprite%+16) <> "qrcode" THEN ERROR 1, "Sprite name was not returned"
+ENDPROC
+
+DEFPROCcall_advanced
+LOCAL err%, flags%, needed%, used%, width%, height%, workspace%, bitmap%
+SYS "XMakeQRCode_Encode", 0, text%, -1, 0, 0, 0 TO err%,,,,, needed%; flags%
+IF flags% AND 1 THEN ERROR err%!0, FNstring0(err%+4)
+DIM workspace% needed%-1
+SYS "XMakeQRCode_Encode", 0, text%, -1, 0, workspace%, needed% TO err%,,,,, used%; flags%
+IF flags% AND 1 THEN ERROR err%!0, FNstring0(err%+4)
+IF used% <> needed% THEN ERROR 1, "Workspace output length changed"
+SYS "XMakeQRCode_Render", 2, workspace%, 0, 0, 0 TO err%, width%, height%,, needed%; flags%
+IF flags% AND 1 THEN ERROR err%!0, FNstring0(err%+4)
+IF width% <= 0 OR height% <> width% THEN ERROR 1, "Bad bitmap dimensions"
+DIM bitmap% needed%-1
+SYS "XMakeQRCode_Render", 2, workspace%, 0, bitmap%, needed% TO err%, width%, height%,, used%; flags%
+IF flags% AND 1 THEN ERROR err%!0, FNstring0(err%+4)
+IF used% <> needed% THEN ERROR 1, "Bitmap output length changed"
+ENDPROC
+
+DEFPROCcall_segments
+LOCAL err%, flags%, needed%, used%, width%, height%, desc%, data%, workspace%, sprite%
+DIM data% 16
+$data% = "HELLO" + CHR$0
+DIM desc% 23
+desc%!0 = 24
+desc%!4 = 2
+desc%!8 = data%
+desc%!12 = 5
+desc%!16 = 5
+desc%!20 = 0
+SYS "XMakeQRCode_EncodeSegments", 0, desc%, 1, 0, 0, 0 TO err%,,,,, needed%; flags%
+IF flags% AND 1 THEN ERROR err%!0, FNstring0(err%+4)
+DIM workspace% needed%-1
+SYS "XMakeQRCode_EncodeSegments", 0, desc%, 1, 0, workspace%, needed% TO err%,,,,, used%; flags%
+IF flags% AND 1 THEN ERROR err%!0, FNstring0(err%+4)
+IF used% <> needed% THEN ERROR 1, "Segment workspace length changed"
+SYS "XMakeQRCode_Render", 1, workspace%, 0, 0, 0 TO err%, width%, height%,, needed%; flags%
+IF flags% AND 1 THEN ERROR err%!0, FNstring0(err%+4)
+DIM sprite% needed%-1
+SYS "XMakeQRCode_Render", 1, workspace%, 0, sprite%, needed% TO err%, width%, height%,, used%; flags%
+IF flags% AND 1 THEN ERROR err%!0, FNstring0(err%+4)
+IF used% <> needed% THEN ERROR 1, "Single sprite output length changed"
+IF !sprite% <> needed% THEN ERROR 1, "Single sprite has wrong next offset"
+ENDPROC
+
+DEFPROCcall_command
+LOCAL objtype%, load%, exec%, length%, attr%, sprite%
+OSCLI "MakeQRCode ""Command text"" ""cmdsprite"""
+SYS "OS_File", 17, "cmdsprite" TO objtype%,, load%, exec%, length%, attr%
+IF objtype% <> 1 THEN ERROR 1, "Command did not create a file"
+IF length% <> &150 THEN ERROR 1, "Command output file has wrong size"
+DIM sprite% 15
+SYS "OS_File", 255, "cmdsprite", sprite%, 0, 16
+IF !sprite% <> 1 THEN ERROR 1, "Command sprite count is wrong"
+IF sprite%!4 <> &10 THEN ERROR 1, "Command sprite first offset is wrong"
+IF sprite%!8 <> &154 THEN ERROR 1, "Command sprite free offset is wrong"
+IF sprite%!12 <> &144 THEN ERROR 1, "Command sprite next offset is wrong"
+SYS "OS_CLI", "MakeQRCode ""Ctrl text"" ""cmdsprite2""" + CHR$31 + " ignored"
+SYS "OS_File", 17, "cmdsprite2" TO objtype%,, load%, exec%, length%, attr%
+IF objtype% <> 1 THEN ERROR 1, "Control-terminated command did not create a file"
+ENDPROC
+
+DEFFNstring0(ptr%)
+LOCAL s$
+SYS "OS_IntOn", ptr% TO s$
+=s$

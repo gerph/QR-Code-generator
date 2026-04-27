@@ -1,0 +1,54 @@
+#!/usr/bin/env riscos-amu -f
+# Makefile for MakeQRCode
+#
+
+#
+# Program specific options:
+#
+COMPONENT  = MakeQRCode
+
+# Specifies additional targets for startup
+INITTARGET = inittarget
+
+# Specifies additional targets for clean
+CLEANTARGET = cleantarget
+
+# Files to export as part of export_hdr or export_libs
+EXPORTS    = ${EXP_C_H}.${COMPONENT}SWIs
+
+# Comma-separated list of paths to use for includes.
+INCLUDES   = C:QRCodeGen.
+
+# Space separated list of libraries to link against.
+LIBS       = C:QRCodeGen.o.libQRCodeGen
+
+# Space separated list of defines to set.
+CDEFINES   =
+
+# Objects to build, using the format o.<name> (will be varied for build type)
+OBJS       = o.modhead \
+            o.module \
+            o.makeqrcode
+
+FORTIFY    = no
+
+DOCSRC     = prminxml.MakeQRCode
+
+include CModule
+
+# Additional dependencies
+$(OZDIR).module: h.modhead h.makeqrcode
+$(OZDIR).makeqrcode: h.modhead h.makeqrcode h.qrcodegen
+
+# Export rules
+${EXP_C_H}.${COMPONENT}SWIs: cmhg.modhead
+       ${CMHG} ${CMHGFLAGS} -xh $@ cmhg.modhead
+
+cleantarget:
+           ${DESTROY} h.modhead
+
+inittarget:
+           ${MKDIR} h
+
+#---------------------------------------------------------------------------
+# Dynamic dependencies:
