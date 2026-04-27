@@ -31,7 +31,8 @@
 
 #define MQ_SPRITE_HEADER_SIZE       44u
 #define MQ_SPRITE_PALETTE_SIZE      16u
-#define MQ_SPRITE_FILE_HEADER_SIZE  16u
+#define MQ_SPRITE_FILE_HEADER_SIZE  12u
+#define MQ_SPRITE_FILE_OFFSET_BIAS  4u
 
 typedef struct encode_control {
     unsigned int ecc;
@@ -594,9 +595,8 @@ static void write_sprite_file(unsigned char *out,
 
     single_len = sprite_size(width, height);
     put_word(out, 0, 1);
-    put_word(out, 4, MQ_SPRITE_FILE_HEADER_SIZE);
-    put_word(out, 8, MQ_SPRITE_FILE_HEADER_SIZE + single_len);
-    put_word(out, 12, single_len);
+    put_word(out, 4, MQ_SPRITE_FILE_HEADER_SIZE + MQ_SPRITE_FILE_OFFSET_BIAS);
+    put_word(out, 8, MQ_SPRITE_FILE_HEADER_SIZE + single_len + MQ_SPRITE_FILE_OFFSET_BIAS);
     write_single_sprite(out + MQ_SPRITE_FILE_HEADER_SIZE,
                         qrcode, control, width, height);
 }

@@ -63,3 +63,7 @@ The `MakeQRCode` module provides SWIs for creating QR codes directly from
 applications. The interface is documented in PRM-in-XML format in
 `prminxml/MakeQRCode.xml`; a generated HTML version is in
 `prminxml/html/MakeQRCode.html`.
+
+It also provides a simple command:
+
+    *MakeQRCode "Hello world" "HelloQR"

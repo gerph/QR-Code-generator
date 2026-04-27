@@ -21,3 +21,5 @@ initialisation-code: Mod_Init
 finalisation-code: Mod_Final
 
 swi-decoding-table: MakeQRCode Sprite/SWI_Sprite Encode/SWI_Encode Render/SWI_Render EncodeSegments/SWI_EncodeSegments Info/SWI_Info
+
+command-keyword-table: Mod_Command MakeQRCode(min-args: 2,max-args: 2,invalid-syntax: "Syntax: *MakeQRCode \"Text\" \"<filename>\"",help-text: "MakeQRCode creates a QR code sprite file")

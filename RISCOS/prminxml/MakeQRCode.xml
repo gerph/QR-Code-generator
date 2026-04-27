@@ -234,7 +234,7 @@ Render format values are used by <reference type="swi" name="MakeQRCode_Render"/
 </p>
 <p>
 <value-table head-number="Value" head-value="Format">
- <value number="0">RISC OS sprite file containing one mode 18 sprite, with a two-entry palette and no mask.</value>
+ <value number="0">RISC OS sprite file containing one mode 18 sprite. The output begins with the three-word sprite area header, followed by the single sprite. The sprite area offsets use the usual RISC OS stored offset values, so they are four bytes greater than the byte position in the returned file.</value>
  <value number="1">Single RISC OS mode 18 sprite, with a two-entry palette and no mask. The sprite area file header is not included.</value>
  <value number="2">Packed 1bpp bitmap, one bit per QR module including the requested border. Bit 0 of each byte is the leftmost pixel of that group of eight pixels.</value>
 </value-table>
@@ -485,6 +485,37 @@ loaded MakeQRCode module.
 </p>
 </use>
 </swi-definition>
+
+</section>
+
+<section title="Commands">
+
+<command-definition name="MakeQRCode"
+                    description="Creates a QR code sprite file">
+<syntax>
+ <userreplace>text</userreplace> <userreplace>filename</userreplace>
+</syntax>
+<parameter name="text">
+The text to encode into the QR code. Use quotes if the text contains spaces.
+</parameter>
+<parameter name="filename">
+The sprite file to create.
+</parameter>
+<use>
+<p>
+The command creates a RISC OS sprite file containing one QR code sprite. It uses
+the simple interface defaults: ECC quartile, automatic mask choice, ECC
+boosting, a border of 4 modules, black foreground, white background, and the
+sprite name <userinput>qrcode</userinput>.
+</p>
+</use>
+<example>
+<command>*MakeQRCode "Hello world" "HelloQR"</command>
+</example>
+<related>
+ <reference type="swi" name="MakeQRCode_Sprite"/>
+</related>
+</command-definition>
 
 </section>
 
