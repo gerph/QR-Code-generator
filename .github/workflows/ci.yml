@@ -51,6 +51,19 @@ jobs:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v6
 
+      - name: Get documentation tool
+        run: |
+          wget -O prminxml.tar.gz https://github.com/gerph/riscos-prminxml-tool/releases/download/v1.03.343/POSIX-PRMinXML-1.03.343.tar.gz
+          tar zxvf prminxml.tar.gz
+          ls
+
+      - name: Generate PRM-in-XML documentation
+        run: |
+          cd RISCOS
+          mkdir docs
+          sudo apt-get install -y xsltproc
+          ../riscos-prminxml -f html5+xml -O docs prminxml/MakeQRCode.xml
+
       - name: Obtain prerequisite build tool
         run: |
           # Fetch the build client
@@ -61,7 +74,8 @@ jobs:
           set -o pipefail
           cd RISCOS
           # Zip up the source to send to robuild
-          zip -q9r /tmp/source-archive.zip c h Makefile* VersionNum .robuild.yaml
+          cp ../LICENSE .
+          zip -q9r /tmp/source-archive.zip * .robuild.yaml
 
           # Send the archive file to build service
           ../riscos-build-online -i /tmp/source-archive.zip -a off -t 600 -o /tmp/built

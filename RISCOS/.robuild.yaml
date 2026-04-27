@@ -91,6 +91,10 @@ jobs:
       - X remove <Exports$Dir>.Lib.MakeQRCode
       - X remove <Exports$Dir>.Lib
       - IfThere LICENSE Then copy LICENSE Artifacts.* ~CV
+      # Documentation if we have it...
+      - IfThere docs.MakeQRCode/html Then SetType docs.MakeQRCode/html FAF
+      - IfThere docs.MakeQRCode/xml Then SetType docs.MakeQRCode/xml F80
+      - IfThere docs Then Copy docs Artifacts.* ~CVR
 
       # Done!
       - echo
