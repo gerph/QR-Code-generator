@@ -1,21 +1,20 @@
 ; MakeQRCode module header
 ;
-; The SWI and error bases are unallocated and must be registered before
-; distribution.
+; Allocations confirmed by RISC OS Open.
 
 #include "VersionNum"
 
 title-string: MakeQRCode
 help-string: MakeQRCode Module_MajorVersion_CMHG
 
-swi-chunk-base-number: &C83C0
+swi-chunk-base-number: &5AC40
 
 error-identifiers: err_BufferOverflow(&1E4,"Buffer overflow") \
-                   err_BadFlags(&9E9701,"Bad flags") \
-                   err_BadParameter(&9E9702,"Bad parameter") \
-                   err_DataTooLong(&9E9703,"Data too long") \
-                   err_BadWorkspaceBlock(&9E9704,"Bad workspace block") \
-                   err_NoMemory(&9E9705,"Not enough memory")
+                   err_BadFlags(&822B01,"Bad flags") \
+                   err_BadParameter(&822B02,"Bad parameter") \
+                   err_DataTooLong(&822B03,"Data too long") \
+                   err_BadWorkspaceBlock(&822B04,"Bad workspace block") \
+                   err_NoMemory(&822B05,"Not enough memory")
 
 initialisation-code: Mod_Init
 finalisation-code: Mod_Final

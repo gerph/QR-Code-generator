@@ -284,7 +284,7 @@ between module versions.
 <section title="SWI Calls">
 
 <swi-definition name="MakeQRCode_Sprite"
-                number="C83C0"
+                number="5AC40"
                 description="Encodes text and returns a RISC OS sprite"
                 irqs="enabled"
                 fiqs="enabled"
@@ -320,7 +320,7 @@ The output is a RISC OS sprite file containing one sprite.
 </swi-definition>
 
 <swi-definition name="MakeQRCode_Encode"
-                number="C83C1"
+                number="5AC41"
                 description="Encodes text or binary data into an opaque workspace block"
                 irqs="enabled"
                 fiqs="enabled"
@@ -359,7 +359,7 @@ workspace block contains its own size.
 </swi-definition>
 
 <swi-definition name="MakeQRCode_Render"
-                number="C83C2"
+                number="5AC42"
                 description="Renders an opaque workspace block as image data"
                 irqs="enabled"
                 fiqs="enabled"
@@ -401,7 +401,7 @@ bitmap or sprite format.
 </swi-definition>
 
 <swi-definition name="MakeQRCode_EncodeSegments"
-                number="C83C3"
+                number="5AC43"
                 description="Encodes explicit QR segments into an opaque workspace block"
                 irqs="enabled"
                 fiqs="enabled"
@@ -454,7 +454,7 @@ valid and unchanged.
 </swi-definition>
 
 <swi-definition name="MakeQRCode_Info"
-                number="C83C4"
+                number="5AC44"
                 description="Returns information about the MakeQRCode interface"
                 irqs="enabled"
                 fiqs="enabled"
@@ -533,7 +533,7 @@ the number of bytes required.
 </error-definition>
 
 <error-definition name="MakeQRCode_BadFlags"
-                  number="9E9701"
+                  number="822B01"
                   description="Bad flags">
 <use>
 <p>
@@ -543,7 +543,7 @@ Reserved flag bits were set in R0 or in a parameter block.
 </error-definition>
 
 <error-definition name="MakeQRCode_BadParameter"
-                  number="9E9702"
+                  number="822B02"
                   description="Bad parameter">
 <use>
 <p>
@@ -554,7 +554,7 @@ other parameter was invalid.
 </error-definition>
 
 <error-definition name="MakeQRCode_DataTooLong"
-                  number="9E9703"
+                  number="822B03"
                   description="Data too long">
 <use>
 <p>
@@ -565,7 +565,7 @@ level.
 </error-definition>
 
 <error-definition name="MakeQRCode_BadWorkspaceBlock"
-                  number="9E9704"
+                  number="822B04"
                   description="Bad workspace block">
 <use>
 <p>
@@ -577,7 +577,7 @@ complete.
 </error-definition>
 
 <error-definition name="MakeQRCode_NoMemory"
-                  number="9E9705"
+                  number="822B05"
                   description="Not enough memory">
 <use>
 <p>
