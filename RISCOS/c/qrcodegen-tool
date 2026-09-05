@@ -34,6 +34,7 @@ void syntax(int fail)
     printf("    -m <mask>     Mask type (0-7, or 'auto', default 'auto')\n");
     printf("    -z <size>     Minimum size to use (1-40, default 1)\n");
     printf("    -s <sprite>   Sprite file to write to (default is text)\n");
+    printf("    -i            Invert the sprite colours (dark on light)\n");
 
     exit(fail ? 1 : 0);
 }
@@ -77,7 +78,7 @@ void write_word(FILE *fh, uint32_t word)
 }
 
 
-void createSpriteFile(FILE *fh, const uint8_t qrcode[], int border)
+void createSpriteFile(FILE *fh, const uint8_t qrcode[], int border, int invert)
 {
     int size = qrcodegen_getSize(qrcode);
     int width = size + (border * 2);
@@ -101,11 +102,15 @@ void createSpriteFile(FILE *fh, const uint8_t qrcode[], int border)
     write_word(fh, 44 + palettelen); /* offset of mask (no mask present) */
 
     write_word(fh, 18); /* Mode 18 is a square pixel 2bpp mode */
-    /* Palette entries */
-    write_word(fh, 0x00000010); /* Colour 0 */
-    write_word(fh, 0x00000010); /* Colour 0 */
-    write_word(fh, 0xFFFFFF10); /* Colour 1 */
-    write_word(fh, 0xFFFFFF10); /* Colour 1 */
+    /* Palette entries; inverted, the QR code modules become dark on light */
+    {
+        uint32_t colour0 = invert ? 0xFFFFFF10 : 0x00000010;
+        uint32_t colour1 = invert ? 0x00000010 : 0xFFFFFF10;
+        write_word(fh, colour0); /* Colour 0 */
+        write_word(fh, colour0); /* Colour 0 */
+        write_word(fh, colour1); /* Colour 1 */
+        write_word(fh, colour1); /* Colour 1 */
+    }
 
     /* Now we write out the sprite data */
 
@@ -143,9 +148,10 @@ int main(int argc, char *argv[])
     int border = 4;
     char *end;
     char *spritefile = NULL;
+    int invert = 0;
     const char *text = NULL;
 
-    while ((c=getopt(argc, argv, "ht:e:m:z:s:b:")) != EOF)
+    while ((c=getopt(argc, argv, "hit:e:m:z:s:b:")) != EOF)
     {
         switch (c)
         {
@@ -155,6 +161,10 @@ int main(int argc, char *argv[])
 
             case 't':   /* text */
                 text = optarg;
+                break;
+
+            case 'i':   /* invert the sprite palette */
+                invert = 1;
                 break;
 
             case 's':   /* sprite output */
@@ -225,7 +235,7 @@ int main(int argc, char *argv[])
             FILE *fh = fopen(spritefile, "wb");
             if (!fh)
                 fatal("Cannot write to '%s'", spritefile);
-            createSpriteFile(fh, qrcode, border);
+            createSpriteFile(fh, qrcode, border, invert);
             fclose(fh);
 #ifdef __riscos
             _swix(OS_File, _INR(0, 2), 18, spritefile, 0xFF9);

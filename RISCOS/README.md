@@ -48,6 +48,7 @@ Options:
 * `-m <mask>`: Mask type (0-7, or 'auto', default 'auto')
 * `-z <size>`: Minimum size to use (1-40, default 1)
 * `-s <sprite>`: Sprite file to write to (default is text)
+* `-i`: Invert the sprite colours, so the QR code is dark on light
 
 Example to display the QR code to the screen:
 
